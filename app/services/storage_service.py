@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from google.cloud import storage
@@ -61,7 +61,7 @@ class StorageService:
         # For uniform bucket-level access, we use signed URLs instead of ACLs
         # Expiration time is configurable via SIGNED_URL_EXPIRATION_SECONDS in .env
         # Maximum allowed by Google Cloud Storage is 7 days (604800 seconds)
-        expiration = datetime.utcnow() + timedelta(seconds=settings.signed_url_expiration_seconds)
+        expiration = datetime.now(timezone.utc) + timedelta(seconds=settings.signed_url_expiration_seconds)
         
         try:
             # Generate signed URL using the blob's method
