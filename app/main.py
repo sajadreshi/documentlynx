@@ -9,15 +9,19 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from app.config import settings
 from app.api_routes import router
+from app.prompt_routes import router as prompt_router
 from app.database import Base, engine
 
 # Configure logging
+# Set to DEBUG for development, INFO for production
+log_level = logging.DEBUG if os.getenv("DEBUG", "false").lower() == "true" else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
@@ -41,6 +45,7 @@ async def startup_event():
 
 # Include API routes with prefix
 app.include_router(router)
+app.include_router(prompt_router)
 
 
 @app.get("/")
@@ -67,10 +72,13 @@ async def global_exception_handler(request, exc):
 
 if __name__ == "__main__":
     import uvicorn
+    # Enable debug mode if DEBUG env var is set
+    debug_mode = os.getenv("DEBUG", "false").lower() == "true"
     uvicorn.run(
         "app.main:app",
         host=settings.api_host,
         port=settings.api_port,
-        reload=True
+        reload=True,
+        log_level="debug" if debug_mode else "info"
     )
 

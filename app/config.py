@@ -26,6 +26,11 @@ class Settings(BaseSettings):
 
     # Database Configuration
     database_url: str
+    
+    # LLM API Keys (optional - for LLM integrations)
+    openai_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
 
     class Config:
         """Pydantic config."""

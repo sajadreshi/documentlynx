@@ -6,9 +6,12 @@ pydantic>=2.9.0
 pydantic-settings>=2.6.0
 python-multipart>=0.0.9
 anyio>=4.8.0,<5.0.0
-sqlalchemy>=2.0.36
+sqlalchemy>=2.0.40
 psycopg[binary]>=3.2.2
 alembic==1.12.1
 passlib[bcrypt]==1.7.4
 albumentations<2.0.0
+langchain-openai
+langchain-google-genai
+langchain-groq
 

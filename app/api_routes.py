@@ -1,12 +1,14 @@
 """API routes for document upload endpoints."""
 
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
+import uuid
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.services.storage_service import StorageService
 from app.auth import authenticate_client
 from app.models import ClientCredential
+from app.services.extraction_orchestrator import create_extraction_graph, AgentState
 from google.cloud.exceptions import GoogleCloudError
 
 # Configure logging
@@ -109,5 +111,122 @@ async def upload_document(
         raise HTTPException(
             status_code=500,
             detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+
+class ProcessDocRequest(BaseModel):
+    """Request model for processing a document."""
+    document_url: str = Field(..., description="Public URL of the document from /upload endpoint")
+    user_id: str = Field(..., description="User ID for scoping the processing")
+
+
+class ProcessDocResponse(BaseModel):
+    """Response model for document processing request."""
+    success: bool = Field(..., description="Whether the processing was queued")
+    message: str = Field(..., description="Response message")
+    job_id: str = Field(..., description="Job ID for tracking (if needed)")
+
+
+async def process_document_background(document_url: str, user_id: str, job_id: str):
+    """
+    Background task to process document through LangGraph pipeline.
+    
+    Args:
+        document_url: URL of the document in GCS
+        user_id: User ID
+        job_id: Unique job identifier
+    """
+    logger.info(f"Starting background processing for job {job_id}, document: {document_url}")
+    
+    try:
+        # Extract filename from URL
+        from pathlib import Path
+        document_filename = Path(document_url).name
+        
+        # Create initial agent state with minimal required fields
+        initial_state: AgentState = {
+            "job_id": job_id,
+            "user_id": user_id,
+            "document_url": document_url,
+            "document_filename": document_filename,
+            "file_type": "",  # Will be set by ingestion agent
+            "raw_content": None,
+            "parsed_markdown": None,
+            "extracted_questions": None,
+            "validated_markdown": None,
+            "vector_ids": None,
+            "status": "pending",
+            "error_message": None,
+            "metadata": {},
+            "validation_attempts": 0,
+            "validation_passed": False,
+        }
+        
+        # Create and run the extraction graph
+        graph = create_extraction_graph()
+        
+        # Run the graph (will process through all nodes, but only ingestion does real work)
+        final_state = graph.invoke(initial_state)
+        
+        logger.info(f"Background processing completed for job {job_id}, final status: {final_state.get('status')}")
+        
+    except Exception as e:
+        logger.error(f"Error in background processing for job {job_id}: {str(e)}", exc_info=True)
+
+
+@router.post("/process-doc", response_model=ProcessDocResponse)
+async def process_document(
+    request: ProcessDocRequest,
+    background_tasks: BackgroundTasks,
+    client: ClientCredential = Depends(authenticate_client)
+):
+    """
+    Process a document through the extraction pipeline.
+    
+    Accepts a document URL (from /upload endpoint) and triggers the LangGraph pipeline.
+    Processing happens asynchronously in the background.
+    
+    Requires authentication via X-Client-Id and X-Client-Secret headers.
+    """
+    try:
+        # Validate inputs
+        if not request.document_url or not request.document_url.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="document_url is required and cannot be empty"
+            )
+        
+        if not request.user_id or not request.user_id.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="user_id is required and cannot be empty"
+            )
+        
+        # Generate a simple job ID
+        job_id = str(uuid.uuid4())
+        
+        logger.info(f"Queuing document processing: job_id={job_id}, url={request.document_url}, user_id={request.user_id}")
+        
+        # Add background task
+        background_tasks.add_task(
+            process_document_background,
+            document_url=request.document_url.strip(),
+            user_id=request.user_id.strip(),
+            job_id=job_id
+        )
+        
+        return ProcessDocResponse(
+            success=True,
+            message="Document processing queued successfully",
+            job_id=job_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error queuing document processing: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to queue document processing: {str(e)}"
         )
 
