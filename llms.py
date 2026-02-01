@@ -9,6 +9,7 @@ load_dotenv()
 
 
 available_models = [
+    "gpt-4o",
     "gpt-4o-mini",
     "gemini-1.5-flash",
     "gemini-1.5-pro",
@@ -22,11 +23,11 @@ available_models = [
 
 def get_llm(model: str):
     if model not in available_models:
-        raise ValueError(f"Invalid model. Available models: {available_models.keys()}")
+        raise ValueError(f"Invalid model '{model}'. Available models: {available_models}")
 
-    if model == "gpt-4o-mini":
+    if model in ["gpt-4o", "gpt-4o-mini"]:
         return ChatOpenAI(
-            model_name="gpt-4o-mini",
+            model_name=model,
             temperature=0.0,
             api_key=os.getenv("OPENAI_API_KEY"),
         )
@@ -54,3 +55,6 @@ def get_llm(model: str):
             temperature=0.0,
             api_key=os.getenv("GROQ_API_KEY"),
         )
+    
+    # Fallback - should not reach here due to validation above
+    raise ValueError(f"Model '{model}' not configured")

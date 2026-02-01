@@ -2,7 +2,10 @@
 
 import logging
 import uuid
+from urllib.parse import urlparse
+from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, BackgroundTasks
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.services.storage_service import StorageService
@@ -139,9 +142,9 @@ async def process_document_background(document_url: str, user_id: str, job_id: s
     logger.info(f"Starting background processing for job {job_id}, document: {document_url}")
     
     try:
-        # Extract filename from URL
-        from pathlib import Path
-        document_filename = Path(document_url).name
+        # Extract filename from URL (parse URL to remove query parameters)
+        parsed_url = urlparse(document_url)
+        document_filename = Path(parsed_url.path).name
         
         # Create initial agent state with minimal required fields
         initial_state: AgentState = {
@@ -152,6 +155,7 @@ async def process_document_background(document_url: str, user_id: str, job_id: s
             "file_type": "",  # Will be set by ingestion agent
             "raw_content": None,
             "parsed_markdown": None,
+            "cleaned_markdown": None,  # Cleaned/formatted markdown for UI display
             "extracted_questions": None,
             "validated_markdown": None,
             "vector_ids": None,
@@ -160,6 +164,14 @@ async def process_document_background(document_url: str, user_id: str, job_id: s
             "metadata": {},
             "validation_attempts": 0,
             "validation_passed": False,
+            "docling_options": None,  # Agents can modify to customize Docling conversion
+            "use_file_conversion": True,  # Uses file-based conversion with ZIP output by default
+            "output_zip_path": None,  # Path to output ZIP (set by ingestion agent when use_file_conversion=True)
+            "source_file_path": None,  # Path to source file (kept for validation comparison)
+            "validation_feedback": None,  # LLM feedback on quality issues
+            "document_id": None,  # Database document UUID (set by persistence agent)
+            "question_ids": None,  # List of persisted question UUIDs (set by persistence agent)
+            "public_markdown": None,  # Markdown with public GCS image URLs
         }
         
         # Create and run the extraction graph
@@ -228,5 +240,68 @@ async def process_document(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to queue document processing: {str(e)}"
+        )
+
+
+@router.get("/images/{user_id}/{job_id}/{filename}")
+async def serve_image(
+    user_id: str,
+    job_id: str,
+    filename: str
+):
+    """
+    Serve an image from Google Cloud Storage.
+    
+    This endpoint acts as a proxy for GCS images, handling authentication
+    internally. Images are cached by browsers via Cache-Control headers.
+    
+    This is a public endpoint - no authentication required for viewing images.
+    
+    Args:
+        user_id: The user ID who owns the image
+        job_id: The processing job ID
+        filename: The image filename
+        
+    Returns:
+        The image content with appropriate content-type headers
+        
+    Raises:
+        HTTPException 404: If image not found
+        HTTPException 500: If error retrieving image
+    """
+    try:
+        # Validate path parameters
+        if not user_id or not job_id or not filename:
+            raise HTTPException(
+                status_code=400,
+                detail="user_id, job_id, and filename are required"
+            )
+        
+        # Retrieve image from GCS
+        content, content_type = storage_service.get_image(user_id, job_id, filename)
+        
+        if content is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Image not found: {filename}"
+            )
+        
+        # Return image with caching headers
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=31536000",  # Cache for 1 year
+                "Content-Disposition": f"inline; filename=\"{filename}\""
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving image: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve image: {str(e)}"
         )
 

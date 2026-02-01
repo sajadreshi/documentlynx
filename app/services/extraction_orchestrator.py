@@ -23,18 +23,35 @@ class AgentState(TypedDict):
     # Processing stages
     raw_content: str | None
     parsed_markdown: str | None
+    cleaned_markdown: str | None  # Cleaned/formatted markdown for UI display
     extracted_questions: list[dict] | None
     validated_markdown: str | None
     vector_ids: list[str] | None
     
     # Status and metadata
-    status: Literal["pending", "ingesting", "parsing", "extracting", "validating", "vectorizing", "persisting", "completed", "failed"]
+    status: Literal["pending", "ingesting", "parsing", "extracting", "validating", "persisting", "classifying", "vectorizing", "completed", "failed"]
     error_message: str | None
     metadata: dict
     
     # Validation loop control
     validation_attempts: int
     validation_passed: bool
+    
+    # Docling options (agents can modify these to customize conversion)
+    docling_options: dict | None
+    
+    # File-based conversion settings
+    use_file_conversion: bool  # If True, use file-based conversion with ZIP output
+    output_zip_path: str | None  # Path to output ZIP for next agent
+    
+    # Validation-specific fields
+    source_file_path: str | None  # Path to downloaded source file (kept for validation)
+    validation_feedback: str | None  # LLM feedback on quality issues
+    
+    # Persistence-specific fields
+    document_id: str | None  # Database document UUID
+    question_ids: list[str] | None  # List of persisted question UUIDs
+    public_markdown: str | None  # Markdown with public GCS image URLs
 
 
 def create_extraction_graph() -> StateGraph:
@@ -48,13 +65,13 @@ def create_extraction_graph() -> StateGraph:
     workflow = StateGraph(AgentState)
     
     # Add nodes for each agent
-    # TODO: Implement actual agent logic in separate files
     workflow.add_node("ingestion", ingestion_node)
     workflow.add_node("parsing", parsing_node)
     workflow.add_node("question_extraction", question_extraction_node)
     workflow.add_node("markdown_validation", markdown_validation_node)
-    workflow.add_node("vectorization", vectorization_node)
     workflow.add_node("persistence", persistence_node)
+    workflow.add_node("classification", classification_node)
+    workflow.add_node("vectorization", vectorization_node)
     
     # Define the workflow edges
     # Start with ingestion
@@ -69,21 +86,25 @@ def create_extraction_graph() -> StateGraph:
     # Question Extraction -> Markdown Validation
     workflow.add_edge("question_extraction", "markdown_validation")
     
-    # Markdown Validation -> either back to Parsing (if validation fails) or to Vectorization
+    # Markdown Validation -> either back to Ingestion (if validation fails) or to Persistence
+    # Note: Loops back to ingestion (not parsing) because Docling options need to be modified
     workflow.add_conditional_edges(
         "markdown_validation",
-        should_retry_parsing,
+        should_retry_ingestion,
         {
-            "retry": "parsing",
-            "continue": "vectorization"
+            "retry": "ingestion",
+            "continue": "persistence"
         }
     )
     
-    # Vectorization -> Persistence
-    workflow.add_edge("vectorization", "persistence")
+    # Persistence -> Classification (persistence creates questions, then we classify them)
+    workflow.add_edge("persistence", "classification")
     
-    # Persistence -> END
-    workflow.add_edge("persistence", END)
+    # Classification -> Vectorization (classification adds metadata, then we embed with that context)
+    workflow.add_edge("classification", "vectorization")
+    
+    # Vectorization -> END
+    workflow.add_edge("vectorization", END)
     
     return workflow.compile()
 
@@ -103,11 +124,16 @@ def ingestion_node(state: AgentState) -> AgentState:
 
 
 def parsing_node(state: AgentState) -> AgentState:
-    """Parsing Agent node - uses Docling and format-specific tools to generate Markdown."""
+    """Parsing Agent node - cleans up markdown using LLM for better UI display."""
+    from app.agents.parsing_agent import ParsingAgent
+    
     logger.info(f"Parsing agent processing job {state['job_id']}")
-    # TODO: Implement parsing logic
-    state["status"] = "parsing"
-    return state
+    
+    # Use ParsingAgent to process
+    agent = ParsingAgent()
+    updated_state = agent.process(state)
+    
+    return updated_state
 
 
 def question_extraction_node(state: AgentState) -> AgentState:
@@ -119,49 +145,77 @@ def question_extraction_node(state: AgentState) -> AgentState:
 
 
 def markdown_validation_node(state: AgentState) -> AgentState:
-    """Markdown Validation Agent node - validates and refines Markdown output."""
+    """Markdown Validation Agent node - validates markdown quality using LLM."""
+    from app.agents.markdown_validation_agent import MarkdownValidationAgent
+    
     logger.info(f"Markdown validation agent processing job {state['job_id']}")
-    # TODO: Implement validation logic
-    state["status"] = "validating"
-    state["validation_attempts"] = state.get("validation_attempts", 0) + 1
-    # For now, always pass validation (will be implemented later)
-    state["validation_passed"] = True
-    return state
+    
+    # Use MarkdownValidationAgent to process
+    agent = MarkdownValidationAgent()
+    updated_state = agent.process(state)
+    
+    return updated_state
+
+
+def classification_node(state: AgentState) -> AgentState:
+    """Classification Agent node - classifies questions by subject, difficulty, and other metadata."""
+    from app.agents.classification_agent import ClassificationAgent
+    
+    logger.info(f"Classification agent processing job {state['job_id']}")
+    
+    # Use ClassificationAgent to process
+    agent = ClassificationAgent()
+    updated_state = agent.process(state)
+    
+    return updated_state
 
 
 def vectorization_node(state: AgentState) -> AgentState:
-    """Vectorization Agent node - embeds and stores questions with deduplication."""
+    """Vectorization Agent node - generates embeddings for questions using pgvector."""
+    from app.agents.vectorization_agent import VectorizationAgent
+    
     logger.info(f"Vectorization agent processing job {state['job_id']}")
-    # TODO: Implement vectorization logic
-    state["status"] = "vectorizing"
-    return state
+    
+    # Use VectorizationAgent to process
+    agent = VectorizationAgent()
+    updated_state = agent.process(state)
+    
+    return updated_state
 
 
 def persistence_node(state: AgentState) -> AgentState:
-    """Persistence Agent node - manages database storage and user scoping."""
+    """Persistence Agent node - uploads images, extracts questions, persists to database."""
+    from app.agents.persistence_agent import PersistenceAgent
+    
     logger.info(f"Persistence agent processing job {state['job_id']}")
-    # TODO: Implement persistence logic
-    state["status"] = "persisting"
-    state["status"] = "completed"
-    return state
+    
+    # Use PersistenceAgent to process
+    agent = PersistenceAgent()
+    updated_state = agent.process(state)
+    
+    return updated_state
 
 
-def should_retry_parsing(state: AgentState) -> Literal["retry", "continue"]:
+def should_retry_ingestion(state: AgentState) -> Literal["retry", "continue"]:
     """
-    Determine if parsing should be retried based on validation results.
+    Determine if ingestion should be retried based on validation results.
+    
+    When validation fails, we loop back to ingestion (not parsing) because
+    the validation agent modifies Docling options to try different conversion
+    parameters (PDF backend, OCR engine, etc.).
     
     Args:
         state: Current agent state
         
     Returns:
-        "retry" if validation failed and attempts < 3, "continue" otherwise
+        "retry" if validation failed and attempts < max, "continue" otherwise
     """
     validation_passed = state.get("validation_passed", False)
     validation_attempts = state.get("validation_attempts", 0)
     max_attempts = 3
     
     if not validation_passed and validation_attempts < max_attempts:
-        logger.warning(f"Validation failed, retrying parsing (attempt {validation_attempts + 1}/{max_attempts})")
+        logger.warning(f"Validation failed, retrying ingestion with new Docling options (attempt {validation_attempts + 1}/{max_attempts})")
         return "retry"
     
     if not validation_passed:

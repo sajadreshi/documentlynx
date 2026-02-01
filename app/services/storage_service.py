@@ -4,9 +4,9 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from google.cloud import storage
-from google.cloud.exceptions import GoogleCloudError
+from google.cloud.exceptions import GoogleCloudError, NotFound
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -132,4 +132,143 @@ class StorageService:
         blob_path = f"documents.in/{user_id.strip()}/{filename.strip()}"
         blob = self.bucket.blob(blob_path)
         return blob.exists()
+    
+    def upload_image_public(
+        self, file_content: bytes, filename: str, user_id: str, job_id: str
+    ) -> str:
+        """
+        Upload an image to Google Cloud Storage and return an application-served URL.
+        
+        Images are stored in the processed/{user_id}/{job_id}/images/ directory.
+        Instead of direct GCS URLs (which require auth), returns an application
+        endpoint URL that serves the image through the API.
+
+        Args:
+            file_content: The image content as bytes
+            filename: The image filename
+            user_id: The user ID to organize images
+            job_id: The job ID for grouping related images
+
+        Returns:
+            str: Full application URL for serving the image (includes host from settings)
+
+        Raises:
+            GoogleCloudError: If upload fails
+            ValueError: If parameters are invalid
+        """
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+        
+        if not filename or not filename.strip():
+            raise ValueError("filename cannot be empty")
+        
+        if not job_id or not job_id.strip():
+            raise ValueError("job_id cannot be empty")
+
+        # Construct the blob path: processed/{user_id}/{job_id}/images/{filename}
+        blob_path = f"processed/{user_id.strip()}/{job_id.strip()}/images/{filename.strip()}"
+        
+        # Create blob and upload
+        blob = self.bucket.blob(blob_path)
+        
+        # Upload file content
+        blob.upload_from_string(file_content, content_type=self._get_content_type(filename))
+        
+        logger.info(f"Uploaded image to GCS: {blob_path}")
+        
+        # Return full application URL that serves images through our API
+        # Base URL is configurable via API_BASE_URL in .env
+        base_url = settings.api_base_url.rstrip('/')
+        app_url = f"{base_url}/documently/api/v1/images/{user_id.strip()}/{job_id.strip()}/{filename.strip()}"
+        
+        return app_url
+    
+    def upload_images_from_zip(
+        self, zip_path: str, user_id: str, job_id: str
+    ) -> dict[str, str]:
+        """
+        Extract and upload all images from a ZIP file.
+        
+        Args:
+            zip_path: Path to the ZIP file
+            user_id: The user ID
+            job_id: The job ID
+            
+        Returns:
+            dict: Mapping of local paths to public URLs
+        """
+        import zipfile
+        import os
+        
+        url_mapping = {}
+        
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                for name in zf.namelist():
+                    # Check if it's an image file
+                    if name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg')):
+                        # Read image content
+                        image_content = zf.read(name)
+                        
+                        # Get just the filename
+                        filename = os.path.basename(name)
+                        
+                        # Upload to GCS
+                        public_url = self.upload_image_public(
+                            image_content, filename, user_id, job_id
+                        )
+                        
+                        # Map both full path and filename to URL
+                        url_mapping[name] = public_url  # "artifacts/image_000001.png"
+                        url_mapping[filename] = public_url  # "image_000001.png"
+                        
+                        logger.debug(f"Uploaded image: {name} -> {public_url}")
+            
+            logger.info(f"Uploaded {len(url_mapping) // 2} images from ZIP for job {job_id}")
+            
+        except Exception as e:
+            logger.error(f"Error uploading images from ZIP: {str(e)}", exc_info=True)
+        
+        return url_mapping
+    
+    def get_image(
+        self, user_id: str, job_id: str, filename: str
+    ) -> Tuple[Optional[bytes], Optional[str]]:
+        """
+        Retrieve an image from Google Cloud Storage.
+        
+        Args:
+            user_id: The user ID
+            job_id: The job ID
+            filename: The image filename
+            
+        Returns:
+            Tuple of (image_content, content_type) or (None, None) if not found
+        """
+        if not user_id or not job_id or not filename:
+            return None, None
+        
+        # Construct the blob path
+        blob_path = f"processed/{user_id.strip()}/{job_id.strip()}/images/{filename.strip()}"
+        
+        try:
+            blob = self.bucket.blob(blob_path)
+            
+            if not blob.exists():
+                logger.warning(f"Image not found in GCS: {blob_path}")
+                return None, None
+            
+            # Download the image content
+            content = blob.download_as_bytes()
+            content_type = self._get_content_type(filename)
+            
+            logger.debug(f"Retrieved image from GCS: {blob_path}")
+            return content, content_type
+            
+        except NotFound:
+            logger.warning(f"Image not found: {blob_path}")
+            return None, None
+        except Exception as e:
+            logger.error(f"Error retrieving image from GCS: {str(e)}", exc_info=True)
+            return None, None
 
