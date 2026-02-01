@@ -23,9 +23,30 @@ class Settings(BaseSettings):
     # API Configuration
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    api_base_url: str = "http://localhost:8000"  # Base URL for generating public links
 
     # Database Configuration
     database_url: str
+    
+    # LLM API Keys (optional - for LLM integrations)
+    openai_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    
+    # Docling API Configuration (loaded from .env)
+    docling_api_url: str  # URL-based conversion endpoint
+    docling_file_api_url: str  # File-based conversion endpoint
+    docling_timeout_seconds: int
+    docling_temp_dir: str  # Temp directory for file operations
+    
+    # Validation Configuration
+    validation_llm_model: str = "llama-3.3-70b-versatile"  # LLM model for markdown validation
+    max_validation_attempts: int = 3  # Maximum retry attempts for validation
+    
+    # Embedding Configuration
+    embedding_provider: str = "huggingface"  # "huggingface" or "openai"
+    embedding_model: str = "all-MiniLM-L6-v2"  # Model name for embeddings
+    embedding_dimensions: int = 384  # Must match model output dimensions
 
     class Config:
         """Pydantic config."""
@@ -39,6 +60,7 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         self._validate_credentials()
         self._validate_signed_url_expiration()
+        self._ensure_temp_dir()
 
     def _validate_credentials(self) -> None:
         """Validate that the Google credentials file exists."""
@@ -71,6 +93,21 @@ class Settings(BaseSettings):
                 f"Signed URL expiration must be greater than 0. "
                 f"Current value: {self.signed_url_expiration_seconds}"
             )
+
+    def _ensure_temp_dir(self) -> None:
+        """Ensure the temp directory exists, create if necessary."""
+        temp_path = Path(self.docling_temp_dir)
+        
+        # If path is relative, make it relative to project root
+        if not temp_path.is_absolute():
+            project_root = Path(__file__).parent.parent
+            temp_path = project_root / temp_path
+        
+        # Create directory if it doesn't exist
+        temp_path.mkdir(parents=True, exist_ok=True)
+        
+        # Update to absolute path for use
+        self.docling_temp_dir = str(temp_path)
 
 
 # Global settings instance
