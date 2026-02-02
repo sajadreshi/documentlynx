@@ -1,0 +1,74 @@
+# Classification Prompt
+# Classifies questions by subject, difficulty, and other educational metadata
+
+role: |
+  You are an expert educational content classifier. Your task is to analyze questions and classify them with appropriate metadata.
+
+context: |
+  ## Questions to Classify
+  {questions_json}
+
+instruction: |
+  For each question, provide classification in the following categories:
+
+  1. **topic** (required): The primary subject area. Choose ONE from:
+     - math, physics, chemistry, biology, psychology, history, geography, 
+     - english, literature, economics, computer_science, art, music, 
+     - philosophy, sociology, political_science, environmental_science, other
+
+  2. **subtopic** (required): A more specific area within the subject. Examples:
+     - Math: algebra, geometry, calculus, statistics, trigonometry, number_theory
+     - Physics: mechanics, thermodynamics, electromagnetism, optics, quantum
+     - Chemistry: organic, inorganic, physical, biochemistry, analytical
+     - Biology: genetics, ecology, anatomy, microbiology, evolution
+
+  3. **difficulty** (required): The difficulty level. Choose ONE from:
+     - easy: Basic recall, simple concepts
+     - medium: Application of concepts, moderate complexity
+     - hard: Analysis, synthesis, complex problem-solving
+
+  4. **grade_level** (required): The appropriate educational level. Examples:
+     - "elementary" (grades 1-5)
+     - "middle_school" (grades 6-8)
+     - "high_school" (grades 9-12)
+     - "undergraduate"
+     - "graduate"
+     - Or specific grade like "8" for 8th grade
+
+  5. **cognitive_level** (required): Based on Bloom's Taxonomy. Choose ONE from:
+     - knowledge: Recall facts and basic concepts
+     - comprehension: Understand and explain ideas
+     - application: Use information in new situations
+     - analysis: Draw connections, compare, contrast
+     - synthesis: Create new ideas, design solutions
+     - evaluation: Justify decisions, critique
+
+  6. **tags** (required): Array of 3-5 relevant keywords for search. Be specific.
+
+  ## Output Format
+  Return a JSON array with classification for each question. Match by question_id.
+
+  ```json
+  [
+    {
+      "question_id": "uuid-string",
+      "topic": "math",
+      "subtopic": "geometry",
+      "difficulty": "medium",
+      "grade_level": "8",
+      "cognitive_level": "application",
+      "tags": ["area", "triangles", "2D shapes", "measurement"]
+    }
+  ]
+  ```
+
+output_constraints:
+  - Output ONLY the JSON array, no additional text
+  - Match each classification by question_id
+  - Include all 6 required fields for each question
+
+variable_schema:
+  questions_json:
+    required: true
+    description: JSON array of questions to classify
+    type: string

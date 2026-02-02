@@ -25,103 +25,49 @@ class ClientCredential(Base):
         return f"<ClientCredential(client_id='{self.client_id}', is_active={self.is_active})>"
 
 
-class PromptTemplate(Base):
-    """Model for prompt templates with flexible JSONB configuration."""
-
-    __tablename__ = "prompt_templates"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False, index=True)
-    version = Column(String(50), default="v1", index=True)
-    description = Column(Text)
+class Job(Base):
+    """Model for tracking document processing jobs."""
     
-    # Full prompt configuration stored as JSONB
-    # Structure: {
-    #   "instruction": "...",
-    #   "output_constraints": ["...", "..."],
-    #   "role": "...",
-    #   "style_or_tone": ["...", "..."],
-    #   "goal": "..."
-    # }
-    config = Column(JSONB, nullable=False)
+    __tablename__ = "jobs"
     
-    # A/B Testing configuration
-    experiment_group = Column(String(50), index=True)  # "A", "B", "control"
-    traffic_percentage = Column(Float, default=1.0)  # 0.0 to 1.0
-    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String(255), nullable=False, index=True)
+    document_url = Column(Text, nullable=False)
     
-    # Metadata
+    # Status tracking
+    # Values: queued, ingesting, parsing, validating, persisting, classifying, vectorizing, completed, failed
+    status = Column(String(50), default="queued", nullable=False, index=True)
+    error_message = Column(Text)
+    
+    # Results (populated on completion)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="SET NULL"))
+    question_count = Column(Integer, default=0)
+    
+    # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    created_by = Column(String(255))
-    extra_metadata = Column(JSONB)  # Additional flexible data (renamed from metadata to avoid SQLAlchemy conflict)
-
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    
+    # Relationship to document
+    document = relationship("Document", foreign_keys=[document_id])
+    
     def __repr__(self):
-        return f"<PromptTemplate(name='{self.name}', version='{self.version}', group='{self.experiment_group}')>"
+        return f"<Job(id='{self.id}', status='{self.status}', user_id='{self.user_id}')>"
     
-    def get_full_prompt(self, **variables) -> str:
-        """
-        Render the full prompt from config sections using template builder.
-        
-        Args:
-            **variables: Variables to format into the prompt template
-            
-        Returns:
-            str: Fully rendered prompt
-        """
-        from app.services.prompt_template_builder import PromptTemplateBuilder
-        
-        # Use template builder for dynamic construction
-        builder = PromptTemplateBuilder(self.config, variables)
-        
-        # Validate variables if schema exists
-        schema = builder.get_variable_schema()
-        if schema:
-            is_valid, missing = builder.validate_variables(variables)
-            if not is_valid:
-                raise ValueError(
-                    f"Missing required variables: {', '.join(missing)}. "
-                    f"Required variables: {', '.join(schema.keys())}"
-                )
-        
-        # Build and return the prompt
-        return builder.build()
-    
-    def get_required_variables(self) -> list[str]:
-        """
-        Extract required variable names from the prompt template.
-        
-        Returns:
-            list[str]: List of variable names found in the template
-        """
-        from app.services.prompt_template_builder import PromptTemplateBuilder
-        builder = PromptTemplateBuilder(self.config)
-        return builder.get_required_variables()
-    
-    def get_variable_schema(self) -> dict:
-        """
-        Get variable schema from config if defined, otherwise extract from template.
-        
-        Returns:
-            dict: Variable schema with descriptions, types, defaults, etc.
-        """
-        from app.services.prompt_template_builder import PromptTemplateBuilder
-        builder = PromptTemplateBuilder(self.config)
-        return builder.get_variable_schema()
-    
-    def validate_variables(self, variables: dict) -> tuple[bool, list[str]]:
-        """
-        Validate that all required variables are provided.
-        
-        Args:
-            variables: Dictionary of variables to validate
-            
-        Returns:
-            tuple: (is_valid, list_of_missing_variables)
-        """
-        from app.services.prompt_template_builder import PromptTemplateBuilder
-        builder = PromptTemplateBuilder(self.config, variables)
-        return builder.validate_variables(variables)
+    def to_dict(self) -> dict:
+        """Convert job to dictionary for API responses."""
+        return {
+            "job_id": str(self.id),
+            "user_id": self.user_id,
+            "document_url": self.document_url,
+            "status": self.status,
+            "error_message": self.error_message,
+            "document_id": str(self.document_id) if self.document_id else None,
+            "question_count": self.question_count,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+        }
 
 
 class Document(Base):

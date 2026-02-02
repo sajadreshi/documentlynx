@@ -1,4 +1,10 @@
-"""Classification Agent - classifies questions by subject, difficulty, and other metadata."""
+"""Classification Agent - classifies questions by subject, difficulty, and other metadata.
+
+This agent uses LangChain tools for reusable operations:
+- parse_json_array: Parse JSON arrays from LLM responses
+- classify_question: Classify a single question
+- classify_questions_batch: Classify multiple questions efficiently
+"""
 
 import json
 import logging
@@ -6,73 +12,13 @@ import uuid
 from typing import Optional
 
 from app.services.extraction_orchestrator import AgentState
+from app.services.prompt_template_builder import PromptTemplateBuilder
 from app.database import SessionLocal
 from app.models import Question
+from app.tools import parse_json_array, classify_question, classify_questions_batch
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
-
-# Prompt template for LLM-based classification
-CLASSIFICATION_PROMPT = """You are an expert educational content classifier. Your task is to analyze questions and classify them with appropriate metadata.
-
-## Questions to Classify
-{questions_json}
-
-## Instructions
-For each question, provide classification in the following categories:
-
-1. **topic** (required): The primary subject area. Choose ONE from:
-   - math, physics, chemistry, biology, psychology, history, geography, 
-   - english, literature, economics, computer_science, art, music, 
-   - philosophy, sociology, political_science, environmental_science, other
-
-2. **subtopic** (required): A more specific area within the subject. Examples:
-   - Math: algebra, geometry, calculus, statistics, trigonometry, number_theory
-   - Physics: mechanics, thermodynamics, electromagnetism, optics, quantum
-   - Chemistry: organic, inorganic, physical, biochemistry, analytical
-   - Biology: genetics, ecology, anatomy, microbiology, evolution
-
-3. **difficulty** (required): The difficulty level. Choose ONE from:
-   - easy: Basic recall, simple concepts
-   - medium: Application of concepts, moderate complexity
-   - hard: Analysis, synthesis, complex problem-solving
-
-4. **grade_level** (required): The appropriate educational level. Examples:
-   - "elementary" (grades 1-5)
-   - "middle_school" (grades 6-8)
-   - "high_school" (grades 9-12)
-   - "undergraduate"
-   - "graduate"
-   - Or specific grade like "8" for 8th grade
-
-5. **cognitive_level** (required): Based on Bloom's Taxonomy. Choose ONE from:
-   - knowledge: Recall facts and basic concepts
-   - comprehension: Understand and explain ideas
-   - application: Use information in new situations
-   - analysis: Draw connections, compare, contrast
-   - synthesis: Create new ideas, design solutions
-   - evaluation: Justify decisions, critique
-
-6. **tags** (required): Array of 3-5 relevant keywords for search. Be specific.
-
-## Output Format
-Return a JSON array with classification for each question. Match by question_id.
-
-```json
-[
-  {{
-    "question_id": "uuid-string",
-    "topic": "math",
-    "subtopic": "geometry",
-    "difficulty": "medium",
-    "grade_level": "8",
-    "cognitive_level": "application",
-    "tags": ["area", "triangles", "2D shapes", "measurement"]
-  }}
-]
-```
-
-Output ONLY the JSON array, no additional text."""
 
 
 class ClassificationAgent:
@@ -211,6 +157,8 @@ class ClassificationAgent:
         """
         Use LLM to classify questions.
         
+        Uses the classify_questions_batch tool for efficient batch classification.
+        
         Args:
             questions_data: List of question dictionaries
             
@@ -218,24 +166,13 @@ class ClassificationAgent:
             List of classification dictionaries
         """
         try:
-            # Get LLM instance
-            llm = get_llm(self.llm_model)
-            
-            # Build JSON for prompt
-            questions_json = json.dumps(questions_data, indent=2)
-            
-            # Escape curly braces for format string
-            escaped_json = questions_json.replace("{", "{{").replace("}", "}}")
-            
-            # Build prompt
-            prompt = CLASSIFICATION_PROMPT.format(questions_json=escaped_json)
-            
-            # Call LLM
-            response = llm.invoke(prompt)
-            response_text = response.content if hasattr(response, 'content') else str(response)
-            
-            # Parse JSON response
-            classifications = self._parse_classification_json(response_text)
+            # Use the classify_questions_batch tool for batch processing
+            # This tool handles LLM invocation and JSON parsing internally
+            logger.info(f"  - Using classify_questions_batch tool (LangChain @tool)")
+            classifications = classify_questions_batch.invoke({
+                "questions": questions_data,
+                "llm_model": self.llm_model
+            })
             
             return classifications
             
@@ -247,52 +184,22 @@ class ClassificationAgent:
         """
         Parse JSON array of classifications from LLM response.
         
+        Uses the parse_json_array tool (LangChain @tool) for consistent parsing.
+        
         Args:
             response_text: Raw LLM response
             
         Returns:
             List of classification dictionaries
         """
-        try:
-            # Clean up response
-            text = response_text.strip()
-            
-            # Remove markdown code block wrappers
-            if text.startswith("```json"):
-                text = text[7:]
-            elif text.startswith("```"):
-                text = text[3:]
-            
-            if text.endswith("```"):
-                text = text[:-3]
-            
-            text = text.strip()
-            
-            # Find JSON array
-            start = text.find('[')
-            end = text.rfind(']') + 1
-            
-            if start >= 0 and end > start:
-                json_str = text[start:end]
-                classifications = json.loads(json_str)
-                
-                if isinstance(classifications, list):
-                    return classifications
-            
-            logger.warning(f"Could not parse classification JSON: {text[:200]}...")
-            return []
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {str(e)}")
-            return []
-        except Exception as e:
-            logger.error(f"Error parsing classifications: {str(e)}")
-            return []
+        # Delegate to the parse_json_array tool
+        return parse_json_array.invoke(response_text)
     
     def classify_single_question(self, question_id: str) -> bool:
         """
         Classify a single question (utility method).
         
+        Uses the classify_question tool (LangChain @tool) for single question classification.
         Useful for classifying individual questions after updates.
         
         Args:
@@ -313,20 +220,17 @@ class ClassificationAgent:
                 logger.warning(f"Question not found: {question_id}")
                 return False
             
-            # Prepare question data
-            questions_data = [{
-                "question_id": str(question.id),
+            # Use the classify_question tool (LangChain @tool)
+            logger.info(f"  - Using classify_question tool (LangChain @tool)")
+            classification = classify_question.invoke({
                 "question_text": question.question_text[:1000] if question.question_text else "",
-                "question_type": question.question_type,
-                "options": question.options
-            }]
+                "question_type": question.question_type or "open_ended",
+                "options": question.options,
+                "question_id": str(question.id),
+                "llm_model": self.llm_model
+            })
             
-            # Classify
-            classifications = self._classify_with_llm(questions_data)
-            
-            if classifications and len(classifications) > 0:
-                classification = classifications[0]
-                
+            if classification and "error" not in classification:
                 question.topic = classification.get("topic")
                 question.subtopic = classification.get("subtopic")
                 question.difficulty = classification.get("difficulty")

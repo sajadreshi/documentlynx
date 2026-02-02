@@ -14,7 +14,6 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from app.config import settings
 from app.api_routes import router
-from app.prompt_routes import router as prompt_router
 from app.database import Base, engine
 
 # Configure logging
@@ -45,7 +44,6 @@ async def startup_event():
 
 # Include API routes with prefix
 app.include_router(router)
-app.include_router(prompt_router)
 
 
 @app.get("/")

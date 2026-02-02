@@ -1,17 +1,21 @@
 """API routes for document upload endpoints."""
 
+import asyncio
 import logging
-import uuid
+from datetime import datetime
 from urllib.parse import urlparse
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, BackgroundTasks
+from uuid import UUID
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.services.storage_service import StorageService
 from app.auth import authenticate_client
 from app.models import ClientCredential
+from app.database import SessionLocal
 from app.services.extraction_orchestrator import create_extraction_graph, AgentState
+from app.services.job_service import JobService
 from google.cloud.exceptions import GoogleCloudError
 
 # Configure logging
@@ -125,22 +129,42 @@ class ProcessDocRequest(BaseModel):
 
 class ProcessDocResponse(BaseModel):
     """Response model for document processing request."""
-    success: bool = Field(..., description="Whether the processing was queued")
+    job_id: str = Field(..., description="Job ID for tracking status")
+    status: str = Field(..., description="Current job status")
     message: str = Field(..., description="Response message")
-    job_id: str = Field(..., description="Job ID for tracking (if needed)")
+
+
+def _run_extraction_pipeline(initial_state: AgentState) -> dict:
+    """
+    Run the extraction pipeline synchronously.
+    
+    This function is designed to be run in a thread pool to avoid blocking
+    the async event loop.
+    
+    Args:
+        initial_state: Initial agent state
+        
+    Returns:
+        Final state dictionary from the pipeline
+    """
+    graph = create_extraction_graph()
+    return graph.invoke(initial_state)
 
 
 async def process_document_background(document_url: str, user_id: str, job_id: str):
     """
     Background task to process document through LangGraph pipeline.
     
+    Runs the blocking pipeline in a thread pool to avoid blocking the event loop.
+    
     Args:
         document_url: URL of the document in GCS
         user_id: User ID
-        job_id: Unique job identifier
+        job_id: Unique job identifier (UUID string)
     """
     logger.info(f"Starting background processing for job {job_id}, document: {document_url}")
     
+    db = None
     try:
         # Extract filename from URL (parse URL to remove query parameters)
         parsed_url = urlparse(document_url)
@@ -174,32 +198,76 @@ async def process_document_background(document_url: str, user_id: str, job_id: s
             "public_markdown": None,  # Markdown with public GCS image URLs
         }
         
-        # Create and run the extraction graph
-        graph = create_extraction_graph()
+        # Run the blocking pipeline in a thread pool to avoid blocking the event loop
+        final_state = await asyncio.to_thread(_run_extraction_pipeline, initial_state)
         
-        # Run the graph (will process through all nodes, but only ingestion does real work)
-        final_state = graph.invoke(initial_state)
+        # Check for soft failures (pipeline completed but no output)
+        db = SessionLocal()
+        document_id = final_state.get("document_id")
+        question_ids = final_state.get("question_ids") or []
+        error_message = final_state.get("error_message")
         
-        logger.info(f"Background processing completed for job {job_id}, final status: {final_state.get('status')}")
+        # Determine if the job actually succeeded
+        # A job is considered failed if:
+        # 1. There's an explicit error_message in state
+        # 2. No document was created (document_id is None)
+        # 3. No markdown content was produced
+        has_content = (
+            final_state.get("cleaned_markdown") or 
+            final_state.get("parsed_markdown") or 
+            final_state.get("raw_content")
+        )
+        
+        if error_message:
+            # Explicit error from an agent
+            JobService.fail_job(db, job_id, error_message)
+            logger.error(f"Job {job_id} failed with error: {error_message}")
+        elif not document_id and not has_content:
+            # No document created and no content - something went wrong
+            failure_reason = "Processing failed: No content extracted from document. The source URL may be invalid or expired."
+            JobService.fail_job(db, job_id, failure_reason)
+            logger.error(f"Job {job_id} failed: {failure_reason}")
+        else:
+            # Success
+            JobService.complete_job(
+                db=db,
+                job_id=job_id,
+                document_id=UUID(document_id) if document_id else None,
+                question_count=len(question_ids)
+            )
+            logger.info(f"Background processing completed for job {job_id}, document_id={document_id}, questions={len(question_ids)}")
         
     except Exception as e:
         logger.error(f"Error in background processing for job {job_id}: {str(e)}", exc_info=True)
+        
+        # Mark job as failed
+        try:
+            if db is None:
+                db = SessionLocal()
+            JobService.fail_job(db, job_id, str(e))
+        except Exception as fail_error:
+            logger.error(f"Failed to mark job {job_id} as failed: {fail_error}")
+    finally:
+        if db:
+            db.close()
 
 
 @router.post("/process-doc", response_model=ProcessDocResponse)
 async def process_document(
     request: ProcessDocRequest,
-    background_tasks: BackgroundTasks,
     client: ClientCredential = Depends(authenticate_client)
 ):
     """
     Process a document through the extraction pipeline.
     
     Accepts a document URL (from /upload endpoint) and triggers the LangGraph pipeline.
-    Processing happens asynchronously in the background.
+    Processing happens asynchronously in the background - this endpoint returns immediately.
+    
+    Use GET /jobs/{job_id} to check processing status.
     
     Requires authentication via X-Client-Id and X-Client-Secret headers.
     """
+    db = None
     try:
         # Validate inputs
         if not request.document_url or not request.document_url.strip():
@@ -214,23 +282,31 @@ async def process_document(
                 detail="user_id is required and cannot be empty"
             )
         
-        # Generate a simple job ID
-        job_id = str(uuid.uuid4())
+        # Create job record in database
+        db = SessionLocal()
+        job = JobService.create_job(
+            db=db,
+            user_id=request.user_id.strip(),
+            document_url=request.document_url.strip()
+        )
+        job_id = str(job.id)
         
         logger.info(f"Queuing document processing: job_id={job_id}, url={request.document_url}, user_id={request.user_id}")
         
-        # Add background task
-        background_tasks.add_task(
-            process_document_background,
-            document_url=request.document_url.strip(),
-            user_id=request.user_id.strip(),
-            job_id=job_id
+        # Fire-and-forget: Create an async task that runs independently
+        # This returns immediately without waiting for the pipeline to complete
+        asyncio.create_task(
+            process_document_background(
+                document_url=request.document_url.strip(),
+                user_id=request.user_id.strip(),
+                job_id=job_id
+            )
         )
         
         return ProcessDocResponse(
-            success=True,
-            message="Document processing queued successfully",
-            job_id=job_id
+            job_id=job_id,
+            status="queued",
+            message="Document processing queued. Use GET /jobs/{job_id} to check status."
         )
         
     except HTTPException:
@@ -241,6 +317,9 @@ async def process_document(
             status_code=500,
             detail=f"Failed to queue document processing: {str(e)}"
         )
+    finally:
+        if db:
+            db.close()
 
 
 @router.get("/images/{user_id}/{job_id}/{filename}")
@@ -304,4 +383,74 @@ async def serve_image(
             status_code=500,
             detail=f"Failed to retrieve image: {str(e)}"
         )
+
+
+class JobStatusResponse(BaseModel):
+    """Response model for job status query."""
+    job_id: str = Field(..., description="Job UUID")
+    user_id: str = Field(..., description="User ID")
+    status: str = Field(..., description="Current job status: queued, ingesting, parsing, validating, persisting, classifying, vectorizing, completed, failed")
+    error_message: Optional[str] = Field(None, description="Error message if job failed")
+    document_id: Optional[str] = Field(None, description="Document UUID (available when completed)")
+    question_count: int = Field(0, description="Number of questions extracted")
+    created_at: Optional[datetime] = Field(None, description="When the job was created")
+    started_at: Optional[datetime] = Field(None, description="When processing started")
+    completed_at: Optional[datetime] = Field(None, description="When processing completed")
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+async def get_job_status(
+    job_id: str,
+    client: ClientCredential = Depends(authenticate_client)
+):
+    """
+    Get the current status of a processing job.
+    
+    Use this endpoint to poll for job completion after calling POST /process-doc.
+    
+    Requires authentication via X-Client-Id and X-Client-Secret headers.
+    
+    Args:
+        job_id: The job UUID returned from /process-doc
+        
+    Returns:
+        JobStatusResponse: Current job status and details
+        
+    Raises:
+        HTTPException 404: If job not found
+    """
+    db = None
+    try:
+        db = SessionLocal()
+        job = JobService.get_job(db, job_id)
+        
+        if not job:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Job not found: {job_id}"
+            )
+        
+        return JobStatusResponse(
+            job_id=str(job.id),
+            user_id=job.user_id,
+            status=job.status,
+            error_message=job.error_message,
+            document_id=str(job.document_id) if job.document_id else None,
+            question_count=job.question_count or 0,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting job status: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get job status: {str(e)}"
+        )
+    finally:
+        if db:
+            db.close()
 

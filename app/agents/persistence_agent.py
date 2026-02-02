@@ -13,56 +13,12 @@ from sqlalchemy.orm import Session
 
 from app.services.extraction_orchestrator import AgentState
 from app.services.storage_service import StorageService
+from app.services.prompt_template_builder import PromptTemplateBuilder
 from app.database import SessionLocal
 from app.models import Document, Question
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
-
-# Prompt template for LLM-based question extraction
-QUESTION_EXTRACTION_PROMPT = """You are a document analysis expert. Your task is to extract individual questions from the provided markdown content.
-
-## Markdown Content
-```markdown
-{markdown_content}
-```
-
-## Instructions
-1. Identify each distinct question in the document
-2. For multiple choice questions, extract all answer options
-3. Preserve any image references exactly as they appear
-4. Maintain LaTeX/math formatting
-5. Determine the question type (multiple_choice, open_ended, true_false, fill_in_blank)
-
-## Output Format
-Return a JSON array of questions. Each question object should have:
-- "question_number": integer (1-based order)
-- "question_text": string (full question text including any images)
-- "question_type": string (one of: "multiple_choice", "open_ended", "true_false", "fill_in_blank")
-- "options": object or null (for MCQ: {{"A": "option text", "B": "option text", ...}})
-- "image_urls": array of strings (any image URLs found in this question)
-
-## Example Output
-```json
-[
-  {{
-    "question_number": 1,
-    "question_text": "What is the capital of France?\\n\\nA) London\\nB) Paris\\nC) Berlin\\nD) Madrid",
-    "question_type": "multiple_choice",
-    "options": {{"A": "London", "B": "Paris", "C": "Berlin", "D": "Madrid"}},
-    "image_urls": []
-  }},
-  {{
-    "question_number": 2,
-    "question_text": "Based on the diagram below, what shape is formed?\\n\\n![Image](https://example.com/image.png)\\n\\nA) Triangle\\nB) Square",
-    "question_type": "multiple_choice",
-    "options": {{"A": "Triangle", "B": "Square"}},
-    "image_urls": ["https://example.com/image.png"]
-  }}
-]
-```
-
-Output ONLY the JSON array, no additional text or explanation."""
 
 
 class PersistenceAgent:
@@ -287,11 +243,13 @@ class PersistenceAgent:
             if len(markdown) > max_chars:
                 truncated_markdown += f"\n\n... [truncated, {len(markdown)} total characters]"
             
-            # Escape curly braces for format string
-            escaped_markdown = truncated_markdown.replace("{", "{{").replace("}", "}}")
-            
-            # Build prompt
-            prompt = QUESTION_EXTRACTION_PROMPT.format(markdown_content=escaped_markdown)
+            # Build prompt from file
+            # Note: No need to escape curly braces - PromptTemplateBuilder uses
+            # explicit variable replacement, not Python's .format()
+            prompt = PromptTemplateBuilder.build_from_file(
+                name="question_extraction",
+                variables={"markdown_content": truncated_markdown}
+            )
             
             # Call LLM
             response = llm.invoke(prompt)

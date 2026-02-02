@@ -1,12 +1,16 @@
-"""Template builder for dynamically constructing prompts from config."""
+"""Template builder for dynamically constructing prompts from YAML config files."""
 
 import logging
+import os
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 import re
-from sqlalchemy.orm import Session
-from app.models import PromptTemplate
+import yaml
 
 logger = logging.getLogger(__name__)
+
+# Default prompts directory (relative to project root)
+PROMPTS_DIR = Path(__file__).parent.parent.parent / "prompts"
 
 
 class PromptTemplateBuilder:
@@ -14,11 +18,11 @@ class PromptTemplateBuilder:
     
     # Default section formatters - maps config keys to formatting functions
     DEFAULT_FORMATTERS = {
-        "role": lambda value, **kwargs: f"Role: {value}",
-        "instruction": lambda value, **kwargs: f"Instruction: {value}",
-        "goal": lambda value, **kwargs: f"Goal: {value}",
-        "context": lambda value, **kwargs: f"Context: {value}",
-        "background": lambda value, **kwargs: f"Background: {value}",
+        "role": lambda value: f"Role: {value}",
+        "instruction": lambda value: f"Instruction: {value}",
+        "goal": lambda value: f"Goal: {value}",
+        "context": lambda value: f"Context: {value}",
+        "background": lambda value: f"Background: {value}",
     }
     
     # List sections that should be formatted as bullet points
@@ -52,98 +56,82 @@ class PromptTemplateBuilder:
         self.parts: List[str] = []
     
     @classmethod
-    def from_database(
+    def from_file(
         cls,
-        db: Session,
         name: str,
         variables: Optional[Dict[str, Any]] = None,
-        version: Optional[str] = None
+        prompts_dir: Optional[Path] = None
     ) -> 'PromptTemplateBuilder':
         """
-        Create a builder by reading prompt template from database by name and version.
+        Create a builder by loading prompt config from a YAML file.
         
         Args:
-            db: Database session
-            name: Template name to look up
+            name: Prompt name (filename without .yaml extension)
             variables: Variables for substitution
-            version: Optional specific version (defaults to active version if not specified)
+            prompts_dir: Optional custom prompts directory
             
         Returns:
-            PromptTemplateBuilder: Initialized builder with config from database
+            PromptTemplateBuilder: Initialized builder with config from file
             
         Raises:
-            ValueError: If template not found or not active
+            FileNotFoundError: If prompt file not found
+            yaml.YAMLError: If YAML parsing fails
         """
-        # Build query
-        query = db.query(PromptTemplate).filter(
-            PromptTemplate.name == name,
-            PromptTemplate.is_active == True
-        )
+        dir_path = prompts_dir or PROMPTS_DIR
+        file_path = dir_path / f"{name}.yaml"
         
-        if version:
-            query = query.filter(PromptTemplate.version == version)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Prompt file not found: {file_path}")
         
-        # Get template
-        template = query.first()
+        with open(file_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
         
-        if not template:
-            raise ValueError(
-                f"Prompt template '{name}'" + 
-                (f" version '{version}'" if version else "") + 
-                " not found or not active"
-            )
+        if not config:
+            raise ValueError(f"Empty or invalid YAML config in: {file_path}")
         
-        # Create builder with template config
-        return cls(template.config, variables or {})
+        logger.debug(f"Loaded prompt config from: {file_path}")
+        return cls(config, variables or {})
     
     @classmethod
-    def build_from_database(
+    def build_from_file(
         cls,
-        db: Session,
         name: str,
         variables: Optional[Dict[str, Any]] = None,
-        version: Optional[str] = None
+        prompts_dir: Optional[Path] = None
     ) -> str:
         """
-        Read prompt from database by name and version, replace dynamic values, and return complete prompt.
+        Load prompt from YAML file, replace dynamic values, and return complete prompt.
         
-        This is a convenience method that combines reading from database and building.
+        This is a convenience method that combines loading from file and building.
         
         Args:
-            db: Database session
-            name: Template name to look up
+            name: Prompt name (filename without .yaml extension)
             variables: Dictionary of variables to replace {variable} placeholders
-            version: Optional specific version (defaults to active version if not specified)
+            prompts_dir: Optional custom prompts directory
             
         Returns:
             str: Fully built prompt with all dynamic values replaced
             
         Raises:
-            ValueError: If template not found, not active, or variables are missing
+            FileNotFoundError: If prompt file not found
+            ValueError: If variables are missing
             
         Example:
             ```python
-            from app.database import get_db
-            
-            db = next(get_db())
-            prompt = PromptTemplateBuilder.build_from_database(
-                db=db,
-                name="summarization_prompt_cfg5",
-                version="v1",
+            prompt = PromptTemplateBuilder.build_from_file(
+                name="classification",
                 variables={
-                    "document": "Article content...",
-                    "word_count": "100"
+                    "questions_json": "[{...}]"
                 }
             )
             # Returns complete prompt with all variables replaced
             ```
         """
-        # Read from database and create builder
-        builder = cls.from_database(
-            db=db,
+        # Load from file and create builder
+        builder = cls.from_file(
             name=name,
             variables=variables,
-            version=version
+            prompts_dir=prompts_dir
         )
         
         # Validate variables if schema exists
@@ -201,18 +189,12 @@ class PromptTemplateBuilder:
         """Add a string section to the prompt."""
         # Use custom formatter if available
         if key in self.DEFAULT_FORMATTERS:
-            formatted = self.DEFAULT_FORMATTERS[key](value, **self.variables)
+            formatted = self.DEFAULT_FORMATTERS[key](value)
         else:
             # Default: use key as label
             formatted = f"{key.replace('_', ' ').title()}: {value}"
         
-        # Apply variable substitution to the value before adding
-        try:
-            formatted = formatted.format(**self.variables)
-        except KeyError:
-            # If variable not found, keep original (will be handled in final substitution)
-            pass
-        
+        # Variable substitution is handled in the final _substitute_variables call
         self.parts.append(formatted)
     
     def _add_list_section(self, key: str, value: List[str]) -> None:
@@ -225,12 +207,8 @@ class PromptTemplateBuilder:
         self.parts.append(f"{header}:")
         
         # Add each item as a bullet point
+        # Variable substitution is handled in the final _substitute_variables call
         for item in value:
-            # Apply variable substitution to each item
-            try:
-                item = item.format(**self.variables)
-            except KeyError:
-                pass
             self.parts.append(f"  - {item}")
     
     def _add_dict_section(self, key: str, value: Dict[str, Any]) -> None:
@@ -238,20 +216,13 @@ class PromptTemplateBuilder:
         header = key.replace('_', ' ').title()
         self.parts.append(f"{header}:")
         
+        # Variable substitution is handled in the final _substitute_variables call
         for sub_key, sub_value in value.items():
             if isinstance(sub_value, list):
                 self.parts.append(f"  {sub_key.replace('_', ' ').title()}:")
                 for item in sub_value:
-                    try:
-                        item = item.format(**self.variables)
-                    except KeyError:
-                        pass
                     self.parts.append(f"    - {item}")
             elif isinstance(sub_value, str):
-                try:
-                    sub_value = sub_value.format(**self.variables)
-                except KeyError:
-                    pass
                 self.parts.append(f"  {sub_key.replace('_', ' ').title()}: {sub_value}")
             else:
                 self.parts.append(f"  {sub_key.replace('_', ' ').title()}: {sub_value}")
@@ -263,7 +234,10 @@ class PromptTemplateBuilder:
     
     def _substitute_variables(self, text: str) -> str:
         """
-        Substitute variables in the text using Python string formatting.
+        Substitute variables in the text using explicit replacement.
+        
+        Only replaces known variable placeholders like {variable_name}, leaving
+        all other curly braces (like JSON, LaTeX, etc.) untouched.
         
         Args:
             text: Text with {variable} placeholders
@@ -274,32 +248,43 @@ class PromptTemplateBuilder:
         Raises:
             ValueError: If required variables are missing
         """
+        # Get the expected variables from the schema
+        schema = self.get_variable_schema()
+        expected_vars = set(schema.keys())
+        
         if not self.variables:
-            # Check if there are any variables in the text
-            if re.search(r'\{(\w+)\}', text):
-                # Extract missing variables
-                missing = set(re.findall(r'\{(\w+)\}', text))
+            if expected_vars:
                 raise ValueError(
-                    f"Missing required variables: {', '.join(sorted(missing))}. "
-                    f"Required variables: {', '.join(sorted(missing))}"
+                    f"Missing required variables: {', '.join(sorted(expected_vars))}. "
+                    f"Required variables: {', '.join(sorted(expected_vars))}"
                 )
             return text
         
-        try:
-            return text.format(**self.variables)
-        except KeyError as e:
-            # Find all variables in the text
-            all_vars = set(re.findall(r'\{(\w+)\}', text))
-            provided = set(self.variables.keys())
-            missing = all_vars - provided
-            
-            if missing:
+        # Check for missing required variables
+        provided = set(self.variables.keys())
+        missing = expected_vars - provided
+        
+        if missing:
+            # Only raise if required variables are missing
+            required_missing = [
+                var for var in missing 
+                if schema.get(var, {}).get("required", True)
+            ]
+            if required_missing:
                 raise ValueError(
-                    f"Missing required variables: {', '.join(sorted(missing))}. "
-                    f"Required: {', '.join(sorted(all_vars))}, "
+                    f"Missing required variables: {', '.join(sorted(required_missing))}. "
+                    f"Required: {', '.join(sorted(expected_vars))}, "
                     f"Provided: {', '.join(sorted(provided))}"
                 )
-            raise ValueError(f"Error formatting variables: {e}")
+        
+        # Replace only the known variables using explicit string replacement
+        # This avoids issues with curly braces in content (JSON, LaTeX, etc.)
+        result = text
+        for var_name, var_value in self.variables.items():
+            placeholder = "{" + var_name + "}"
+            result = result.replace(placeholder, str(var_value))
+        
+        return result
     
     def get_required_variables(self) -> List[str]:
         """
@@ -359,4 +344,3 @@ class PromptTemplateBuilder:
                     missing.append(var_name)
         
         return len(missing) == 0, missing
-

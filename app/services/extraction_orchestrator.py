@@ -4,7 +4,23 @@ import logging
 from typing import TypedDict, Literal
 from langgraph.graph import StateGraph, END
 
+from app.database import SessionLocal
+from app.services.job_service import JobService
+
 logger = logging.getLogger(__name__)
+
+
+def _update_job_status(job_id: str, status: str, error_message: str = None) -> None:
+    """Helper to update job status in database."""
+    db = None
+    try:
+        db = SessionLocal()
+        JobService.update_status(db, job_id, status, error_message)
+    except Exception as e:
+        logger.error(f"Failed to update job status: {e}")
+    finally:
+        if db:
+            db.close()
 
 
 # Define the agent state schema
@@ -115,6 +131,7 @@ def ingestion_node(state: AgentState) -> AgentState:
     from app.agents.ingestion_agent import IngestionAgent
     
     logger.info(f"Ingestion agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "ingesting")
     
     # Use IngestionAgent to process
     agent = IngestionAgent()
@@ -128,6 +145,7 @@ def parsing_node(state: AgentState) -> AgentState:
     from app.agents.parsing_agent import ParsingAgent
     
     logger.info(f"Parsing agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "parsing")
     
     # Use ParsingAgent to process
     agent = ParsingAgent()
@@ -139,6 +157,7 @@ def parsing_node(state: AgentState) -> AgentState:
 def question_extraction_node(state: AgentState) -> AgentState:
     """Question Extraction Agent node - identifies and isolates questions."""
     logger.info(f"Question extraction agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "extracting")
     # TODO: Implement question extraction logic
     state["status"] = "extracting"
     return state
@@ -149,6 +168,7 @@ def markdown_validation_node(state: AgentState) -> AgentState:
     from app.agents.markdown_validation_agent import MarkdownValidationAgent
     
     logger.info(f"Markdown validation agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "validating")
     
     # Use MarkdownValidationAgent to process
     agent = MarkdownValidationAgent()
@@ -162,6 +182,7 @@ def classification_node(state: AgentState) -> AgentState:
     from app.agents.classification_agent import ClassificationAgent
     
     logger.info(f"Classification agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "classifying")
     
     # Use ClassificationAgent to process
     agent = ClassificationAgent()
@@ -175,6 +196,7 @@ def vectorization_node(state: AgentState) -> AgentState:
     from app.agents.vectorization_agent import VectorizationAgent
     
     logger.info(f"Vectorization agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "vectorizing")
     
     # Use VectorizationAgent to process
     agent = VectorizationAgent()
@@ -188,6 +210,7 @@ def persistence_node(state: AgentState) -> AgentState:
     from app.agents.persistence_agent import PersistenceAgent
     
     logger.info(f"Persistence agent processing job {state['job_id']}")
+    _update_job_status(state['job_id'], "persisting")
     
     # Use PersistenceAgent to process
     agent = PersistenceAgent()
