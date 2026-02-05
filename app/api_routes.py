@@ -454,3 +454,203 @@ async def get_job_status(
         if db:
             db.close()
 
+
+# =============================================================================
+# Search Endpoints
+# =============================================================================
+
+class SearchResult(BaseModel):
+    """A single search result."""
+    question: dict = Field(..., description="Question data")
+    similarity: float = Field(..., description="Similarity score (0-1)")
+
+
+class SearchResponse(BaseModel):
+    """Response model for question search."""
+    query: str = Field(..., description="The search query")
+    results: list[SearchResult] = Field(..., description="List of matching questions")
+    count: int = Field(..., description="Number of results returned")
+
+
+class SearchStatsResponse(BaseModel):
+    """Response model for search statistics."""
+    user_id: str = Field(..., description="User ID")
+    total_questions: int = Field(..., description="Total questions for user")
+    embedded_questions: int = Field(..., description="Questions with embeddings")
+    searchable_percentage: float = Field(..., description="Percentage of searchable questions")
+
+
+@router.get("/questions/search", response_model=SearchResponse)
+async def search_questions(
+    q: str,
+    limit: int = 10,
+    min_similarity: float = 0.3,
+    user_id: str = None,
+    client: ClientCredential = Depends(authenticate_client)
+):
+    """
+    Semantic search for questions.
+    
+    Finds questions semantically similar to the search query using vector embeddings.
+    Results are scoped to the authenticated user's questions only.
+    
+    Requires authentication via X-Client-Id and X-Client-Secret headers.
+    
+    Args:
+        q: Search query (natural language)
+        limit: Maximum results to return (default: 10, max: 50)
+        min_similarity: Minimum similarity threshold 0-1 (default: 0.3)
+        user_id: Optional user ID filter (defaults to all users for this client)
+        
+    Returns:
+        SearchResponse: List of matching questions with similarity scores
+        
+    Example:
+        GET /questions/search?q=area%20of%20triangle&limit=5
+    """
+    from app.services.search_service import SearchService
+    
+    if not q or not q.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Search query 'q' is required"
+        )
+    
+    # Use provided user_id or require one
+    search_user_id = user_id
+    if not search_user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required for search"
+        )
+    
+    try:
+        search_service = SearchService()
+        results = search_service.search_questions(
+            query=q.strip(),
+            user_id=search_user_id,
+            limit=min(limit, 50),
+            min_similarity=min_similarity
+        )
+        
+        return SearchResponse(
+            query=q.strip(),
+            results=[
+                SearchResult(
+                    question=r["question"],
+                    similarity=r["similarity"]
+                )
+                for r in results
+            ],
+            count=len(results)
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during search: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Search failed: {str(e)}"
+        )
+
+
+@router.get("/questions/{question_id}/similar", response_model=SearchResponse)
+async def find_similar_questions(
+    question_id: str,
+    limit: int = 5,
+    user_id: str = None,
+    client: ClientCredential = Depends(authenticate_client)
+):
+    """
+    Find questions similar to an existing question.
+    
+    Useful for "related questions" or "you might also like" features.
+    
+    Requires authentication via X-Client-Id and X-Client-Secret headers.
+    
+    Args:
+        question_id: UUID of the source question
+        limit: Maximum results to return (default: 5)
+        user_id: User ID who owns the question
+        
+    Returns:
+        SearchResponse: List of similar questions with similarity scores
+    """
+    from app.services.search_service import SearchService
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required"
+        )
+    
+    try:
+        search_service = SearchService()
+        results = search_service.find_similar_to_question(
+            question_id=question_id,
+            user_id=user_id,
+            limit=min(limit, 20)
+        )
+        
+        return SearchResponse(
+            query=f"similar to {question_id}",
+            results=[
+                SearchResult(
+                    question=r["question"],
+                    similarity=r["similarity"]
+                )
+                for r in results
+            ],
+            count=len(results)
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error finding similar questions: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to find similar questions: {str(e)}"
+        )
+
+
+@router.get("/questions/search/stats", response_model=SearchStatsResponse)
+async def get_search_stats(
+    user_id: str,
+    client: ClientCredential = Depends(authenticate_client)
+):
+    """
+    Get statistics about searchable questions for a user.
+    
+    Returns counts of total and embedded questions.
+    
+    Requires authentication via X-Client-Id and X-Client-Secret headers.
+    
+    Args:
+        user_id: User ID to get stats for
+        
+    Returns:
+        SearchStatsResponse: Question counts and search coverage
+    """
+    from app.services.search_service import SearchService
+    
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id is required"
+        )
+    
+    try:
+        search_service = SearchService()
+        stats = search_service.get_search_stats(user_id=user_id)
+        
+        return SearchStatsResponse(**stats)
+        
+    except Exception as e:
+        logger.error(f"Error getting search stats: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get search stats: {str(e)}"
+        )
+
