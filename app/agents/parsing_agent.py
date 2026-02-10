@@ -8,103 +8,11 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy.orm import Session
-
 from app.services.extraction_orchestrator import AgentState
 from app.services.prompt_template_builder import PromptTemplateBuilder
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
-
-# Prompt template name for database lookup
-PARSING_PROMPT_NAME = "document_parsing"
-
-# Default parsing prompt config (used when not found in database)
-DEFAULT_PARSING_PROMPT_CONFIG = {
-    "role": """You are a highly intelligent document processing agent specializing in educational materials. Your task is to analyze the provided markdown content and convert it into clean, well-structured Markdown. The document may contain multiple-choice questions and other complex material.""",
-    
-    "instruction": """Strictly adhere to the following instructions:
-
-1. **Extract Core Content:** Accurately transcribe the main educational content. Focus on questions, options, paragraphs, and explanations.
-
-2. **Ignore Extraneous Noise:** You MUST OMIT any extraneous elements that are not part of the core content. This includes, but is not limited to: page numbers, headers (e.g., "Chapter 5 Review", "Section 2.1"), footers, timestamps, and marginalia. The final output should be a clean representation of the educational material itself.
-
-3. **Structure and Formatting:** Preserve the original document's structure using Markdown elements like headings (#, ##), lists, bold (**text**), italics (*text*), and blockquotes (>).
-
-4. **CRITICAL - Image Formatting:** Images MUST be properly spaced:
-   - ALWAYS put a blank line BEFORE each image
-   - ALWAYS put a blank line AFTER each image
-   - Images should NEVER be inline with text
-   - Format: `![Image](image_path)`
-   - Example of CORRECT formatting:
-     ```
-     The diagram below shows a person flying a kite.
-     
-     ![Image](artifacts/image_001.png)
-     
-     Which equation can be used to determine the value of x?
-     ```
-   - Example of WRONG formatting (DO NOT do this):
-     ```
-     The diagram below shows a person flying a kite. ![Image](artifacts/image_001.png) Which equation...
-     ```
-
-5. **CRITICAL - Multiple Choice Questions:** Each question MUST be properly formatted:
-   - Put the question text on its own line(s)
-   - Put a blank line between the question and the options
-   - Put EACH option on its OWN LINE (A, B, C, D must be separate lines)
-   - Use inline math ($...$) for equations in options, NOT block math ($$...$$)
-   - Put a blank line between questions
-   - Example of CORRECT formatting:
-     ```
-     ## Question 5
-     
-     What is the equation of the line?
-     
-     A) $y = -2x + 6$
-     B) $y = -\\frac{1}{2}x + 3$
-     C) $y = -\\frac{1}{2}x + 6$
-     D) $y = 2x + 3$
-     
-     ## Question 6
-     ```
-   - Example of WRONG formatting (DO NOT do this):
-     ```
-     What is the equation? A) $y = -2x + 6$ B) $y = -\\frac{1}{2}x + 3$ C) ...
-     ```
-
-6. **Mathematical & Scientific Notation:** 
-   - Use inline math ($...$) for equations within text or answer options
-   - Use block math ($$...$$) ONLY for standalone equations that need their own line
-   - Remove excessive spacing in LaTeX (e.g., $y = -\\frac{1}{2}x$ not $y = - \\frac { 1 } { 2 } x$)
-
-7. **Chemical Equations:** Transcribe chemical equations accurately using subscripts/superscripts (e.g., H₂O).
-
-8. **Tables:** Recreate any tables using Markdown table syntax.
-
-9. **Cleanliness:** Do not include any conversational text, apologies, or explanations. Output ONLY the cleaned markdown content.""",
-    
-    "context": """## Original Markdown Content
-```markdown
-{markdown_content}
-```
-
-## Images Referenced
-{image_list}""",
-    
-    "output_constraints": [
-        "Output ONLY the cleaned markdown content",
-        "EVERY image must have a blank line before AND after it",
-        "EVERY MCQ option (A, B, C, D) must be on its own separate line",
-        "Preserve all image references exactly as provided",
-        "Use proper line breaks between questions",
-    ],
-    
-    "variable_schema": {
-        "markdown_content": {"required": True, "description": "Original markdown content to clean", "type": "string"},
-        "image_list": {"required": True, "description": "List of images referenced in the document", "type": "string"},
-    }
-}
 
 
 class ParsingAgent:
@@ -227,8 +135,7 @@ class ParsingAgent:
     def _cleanup_with_llm(
         self,
         markdown_content: str,
-        image_files: list[str],
-        db: Optional[Session] = None
+        image_files: list[str]
     ) -> Optional[str]:
         """
         Call LLM to clean up markdown content.
@@ -236,7 +143,6 @@ class ParsingAgent:
         Args:
             markdown_content: The original markdown content
             image_files: List of image files in the ZIP
-            db: Optional database session for loading prompt from database
             
         Returns:
             Cleaned markdown content or None if LLM call fails
@@ -252,21 +158,19 @@ class ParsingAgent:
             if len(markdown_content) > max_chars:
                 truncated_markdown += f"\n\n... [truncated, total {len(markdown_content)} characters]"
             
-            # Escape curly braces in markdown content to prevent format string errors
-            # LaTeX formulas like {matrix} would otherwise be interpreted as variables
-            escaped_markdown = truncated_markdown.replace("{", "{{").replace("}", "}}")
-            
             # Format image list
             image_list = "\n".join([f"- {img}" for img in image_files]) if image_files else "No images found"
             
             # Prepare variables for prompt
+            # Note: No need to escape curly braces - PromptTemplateBuilder uses
+            # explicit variable replacement, not Python's .format()
             variables = {
-                "markdown_content": escaped_markdown,
+                "markdown_content": truncated_markdown,
                 "image_list": image_list
             }
             
             # Build prompt using PromptTemplateBuilder
-            prompt = self._build_parsing_prompt(variables, db)
+            prompt = self._build_parsing_prompt(variables)
             
             # Call LLM
             response = llm.invoke(prompt)
@@ -281,43 +185,24 @@ class ParsingAgent:
             logger.error(f"LLM parsing error: {str(e)}", exc_info=True)
             return None
     
-    def _build_parsing_prompt(
-        self,
-        variables: dict,
-        db: Optional[Session] = None
-    ) -> str:
+    def _build_parsing_prompt(self, variables: dict) -> str:
         """
         Build the parsing prompt using PromptTemplateBuilder.
         
-        Tries to load from database first, falls back to default config.
+        Loads prompt from YAML file.
         
         Args:
             variables: Variables to substitute in the prompt
-            db: Optional database session
             
         Returns:
             Built prompt string
         """
         try:
-            # Try to load from database if session provided
-            if db:
-                try:
-                    prompt = PromptTemplateBuilder.build_from_database(
-                        db=db,
-                        name=PARSING_PROMPT_NAME,
-                        variables=variables
-                    )
-                    logger.debug(f"Loaded parsing prompt from database: {PARSING_PROMPT_NAME}")
-                    return prompt
-                except ValueError as e:
-                    logger.debug(f"Prompt not found in database, using default: {e}")
-            
-            # Fall back to default config
-            builder = PromptTemplateBuilder(
-                config=DEFAULT_PARSING_PROMPT_CONFIG,
+            # Load prompt from file
+            return PromptTemplateBuilder.build_from_file(
+                name="parsing",
                 variables=variables
             )
-            return builder.build()
             
         except Exception as e:
             logger.error(f"Error building parsing prompt: {e}")

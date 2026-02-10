@@ -8,8 +8,6 @@ import zipfile
 from pathlib import Path
 from typing import Optional
 
-from sqlalchemy.orm import Session
-
 from app.services.extraction_orchestrator import AgentState
 from app.services.docling_service import docling_service
 from app.services.prompt_template_builder import PromptTemplateBuilder
@@ -135,9 +133,6 @@ def parse_json_safely(response_text: str) -> Optional[dict]:
     logger.warning(f"All JSON parsing strategies failed for: {json_str[:200]}...")
     return None
 
-# Prompt template name for database lookup
-VALIDATION_PROMPT_NAME = "markdown_validation"
-
 # Default retry configurations with different Docling parameters
 DOCLING_RETRY_CONFIGS = [
     # Attempt 2: Force OCR with tesseract
@@ -154,65 +149,6 @@ DOCLING_RETRY_CONFIGS = [
         "do_formula_enrichment": True,
     },
 ]
-
-# Default validation prompt config (used when not found in database)
-# This config structure is compatible with PromptTemplateBuilder
-# NOTE: Double braces {{ }} are used to escape curly braces in .format()
-DEFAULT_VALIDATION_PROMPT_CONFIG = {
-    "role": "You are a document quality validator. Your task is to evaluate the quality of a markdown conversion by comparing it against the original source document.",
-    
-    "context": """## Source Document Information
-- Filename: {source_filename}
-- File type: {file_type}
-- File size: {file_size} bytes
-
-## Generated Markdown Content
-```markdown
-{markdown_content}
-```
-
-## Images Found in Output
-{image_list}""",
-    
-    "instruction": """Please evaluate the markdown output based on these criteria:
-
-1. **STRUCTURAL INTEGRITY** (25 points)
-   - Are headings properly converted and hierarchically correct?
-   - Are lists (bullet points, numbered lists) preserved?
-   - Are tables converted with correct structure?
-   - Is the document flow/order maintained?
-
-2. **CONTENT ACCURACY** (35 points)
-   - Is the text content accurate and complete?
-   - Are there any missing sections or paragraphs?
-   - Are special characters and formatting preserved?
-   - Are mathematical formulas or equations handled correctly?
-
-3. **IMAGE HANDLING** (20 points)
-   - Are all images from the source referenced in the markdown?
-   - Do image references point to valid files?
-   - Are image captions/alt text preserved if present?
-
-4. **READABILITY** (20 points)
-   - Is the markdown well-formatted and readable?
-   - Are there any OCR artifacts or garbled text?
-   - Is whitespace and paragraph separation appropriate?""",
-    
-    "output_constraints": [
-        "Respond with a JSON object only, no additional text",
-        "Include these fields: passed (boolean), score (0-100), structural_score (0-25), content_score (0-35), image_score (0-20), readability_score (0-20), issues (array of strings), recommendation (string)",
-        "A score of 70 or above should set passed=true, otherwise passed=false",
-    ],
-    
-    "variable_schema": {
-        "source_filename": {"required": True, "description": "Name of the source document file", "type": "string"},
-        "file_type": {"required": True, "description": "Detected file type (pdf, docx, etc.)", "type": "string"},
-        "file_size": {"required": True, "description": "Size of the source file in bytes", "type": "integer"},
-        "markdown_content": {"required": True, "description": "Generated markdown content to validate", "type": "string"},
-        "image_list": {"required": True, "description": "List of images found in the output", "type": "string"},
-    }
-}
-
 
 class MarkdownValidationAgent:
     """Agent responsible for validating markdown quality against source document using LLM."""
@@ -401,21 +337,18 @@ class MarkdownValidationAgent:
         markdown_content: str,
         image_files: list[str],
         source_info: dict,
-        file_type: str,
-        db: Optional[Session] = None
+        file_type: str
     ) -> Optional[dict]:
         """
         Call LLM to validate markdown quality.
         
-        Uses PromptTemplateBuilder to construct the prompt, either from database
-        (if db session provided) or from default config.
+        Uses PromptTemplateBuilder to construct the prompt from YAML file.
         
         Args:
             markdown_content: The generated markdown content
             image_files: List of image files in the ZIP
             source_info: Information about the source file
             file_type: Detected file type
-            db: Optional database session for loading prompt from database
             
         Returns:
             Validation result dictionary or None if LLM call fails
@@ -432,21 +365,19 @@ class MarkdownValidationAgent:
             # Format image list
             image_list = "\n".join([f"- {img}" for img in image_files]) if image_files else "No images found"
             
-            # Escape curly braces in markdown content to prevent format string errors
-            # LaTeX formulas like {matrix} would otherwise be interpreted as variables
-            escaped_markdown = truncated_markdown.replace("{", "{{").replace("}", "}}")
-            
             # Prepare variables for prompt
+            # Note: No need to escape curly braces - PromptTemplateBuilder uses
+            # explicit variable replacement, not Python's .format()
             variables = {
                 "source_filename": source_info.get("filename", "unknown"),
                 "file_type": file_type,
                 "file_size": str(source_info.get("file_size", 0)),
-                "markdown_content": escaped_markdown,
+                "markdown_content": truncated_markdown,
                 "image_list": image_list
             }
             
             # Build prompt using PromptTemplateBuilder
-            prompt = self._build_validation_prompt(variables, db)
+            prompt = self._build_validation_prompt(variables)
             
             # Call LLM
             response = llm.invoke(prompt)
@@ -469,47 +400,28 @@ class MarkdownValidationAgent:
             logger.error(f"LLM validation error: {str(e)}", exc_info=True)
             return None
     
-    def _build_validation_prompt(
-        self,
-        variables: dict,
-        db: Optional[Session] = None
-    ) -> str:
+    def _build_validation_prompt(self, variables: dict) -> str:
         """
         Build the validation prompt using PromptTemplateBuilder.
         
-        Tries to load from database first, falls back to default config.
+        Loads prompt from YAML file.
         
         Args:
             variables: Variables to substitute in the prompt
-            db: Optional database session
             
         Returns:
             Built prompt string
         """
         try:
-            # Try to load from database if session provided
-            if db:
-                try:
-                    prompt = PromptTemplateBuilder.build_from_database(
-                        db=db,
-                        name=VALIDATION_PROMPT_NAME,
-                        variables=variables
-                    )
-                    logger.debug(f"Loaded validation prompt from database: {VALIDATION_PROMPT_NAME}")
-                    return prompt
-                except ValueError as e:
-                    logger.debug(f"Prompt not found in database, using default: {e}")
-            
-            # Fall back to default config
-            builder = PromptTemplateBuilder(
-                config=DEFAULT_VALIDATION_PROMPT_CONFIG,
+            # Load prompt from file
+            return PromptTemplateBuilder.build_from_file(
+                name="markdown_validation",
                 variables=variables
             )
-            return builder.build()
             
         except Exception as e:
             logger.error(f"Error building validation prompt: {e}")
-            # Ultimate fallback - simple formatted string (using % formatting to avoid brace issues)
+            # Ultimate fallback - simple formatted string
             source_filename = variables.get('source_filename', 'unknown')
             file_type = variables.get('file_type', 'unknown')
             markdown_content = variables.get('markdown_content', '')[:5000]

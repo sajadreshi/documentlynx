@@ -1,0 +1,71 @@
+# Markdown Validation Prompt
+# Evaluates the quality of markdown conversion against source document
+
+role: |
+  You are a document quality validator. Your task is to evaluate the quality of a markdown conversion by comparing it against the original source document.
+
+context: |
+  ## Source Document Information
+  - Filename: {source_filename}
+  - File type: {file_type}
+  - File size: {file_size} bytes
+
+  ## Generated Markdown Content
+  ```markdown
+  {markdown_content}
+  ```
+
+  ## Images Found in Output
+  {image_list}
+
+instruction: |
+  Please evaluate the markdown output based on these criteria:
+
+  1. **STRUCTURAL INTEGRITY** (25 points)
+     - Are headings properly converted and hierarchically correct?
+     - Are lists (bullet points, numbered lists) preserved?
+     - Are tables converted with correct structure?
+     - Is the document flow/order maintained?
+
+  2. **CONTENT ACCURACY** (35 points)
+     - Is the text content accurate and complete?
+     - Are there any missing sections or paragraphs?
+     - Are special characters and formatting preserved?
+     - Are mathematical formulas or equations handled correctly?
+
+  3. **IMAGE HANDLING** (20 points)
+     - Are all images from the source referenced in the markdown?
+     - Do image references point to valid files?
+     - Are image captions/alt text preserved if present?
+
+  4. **READABILITY** (20 points)
+     - Is the markdown well-formatted and readable?
+     - Are there any OCR artifacts or garbled text?
+     - Is whitespace and paragraph separation appropriate?
+
+output_constraints:
+  - Respond with a JSON object only, no additional text
+  - "Include these fields: passed (boolean), score (0-100), structural_score (0-25), content_score (0-35), image_score (0-20), readability_score (0-20), issues (array of strings), recommendation (string)"
+  - A score of 70 or above should set passed=true, otherwise passed=false
+
+variable_schema:
+  source_filename:
+    required: true
+    description: Name of the source document file
+    type: string
+  file_type:
+    required: true
+    description: Detected file type (pdf, docx, etc.)
+    type: string
+  file_size:
+    required: true
+    description: Size of the source file in bytes
+    type: integer
+  markdown_content:
+    required: true
+    description: Generated markdown content to validate
+    type: string
+  image_list:
+    required: true
+    description: List of images found in the output
+    type: string
