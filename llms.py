@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Default timeout for LLM calls (seconds)
+LLM_REQUEST_TIMEOUT = 60
 
 available_models = [
     "gpt-4o",
@@ -30,12 +32,14 @@ def get_llm(model: str):
             model_name=model,
             temperature=0.0,
             api_key=os.getenv("OPENAI_API_KEY"),
+            request_timeout=LLM_REQUEST_TIMEOUT,
         )
     elif model in ["gemini-1.5-flash", "gemini-1.5-pro"]:
         return ChatGoogleGenerativeAI(
             model=model,
             temperature=0.0,
             api_key=os.getenv("GOOGLE_API_KEY"),
+            timeout=LLM_REQUEST_TIMEOUT,
         )
     elif model == "lm-studio":
         return ChatOpenAI(
@@ -43,6 +47,7 @@ def get_llm(model: str):
             api_key="lm-studio",
             model="openai/gpt-oss-20b",
             temperature=0.7,
+            request_timeout=LLM_REQUEST_TIMEOUT,
         )
     elif model in [
         "llama-3.1-8b-instant",
@@ -54,7 +59,8 @@ def get_llm(model: str):
             model_name=model,
             temperature=0.0,
             api_key=os.getenv("GROQ_API_KEY"),
+            request_timeout=LLM_REQUEST_TIMEOUT,
         )
-    
+
     # Fallback - should not reach here due to validation above
     raise ValueError(f"Model '{model}' not configured")

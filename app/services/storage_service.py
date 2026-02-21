@@ -202,6 +202,7 @@ class StorageService:
         
         url_mapping = {}
         
+        failed_images = []
         try:
             with zipfile.ZipFile(zip_path, 'r') as zf:
                 for name in zf.namelist():
@@ -209,26 +210,39 @@ class StorageService:
                     if name.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg')):
                         # Read image content
                         image_content = zf.read(name)
-                        
+
                         # Get just the filename
                         filename = os.path.basename(name)
-                        
-                        # Upload to GCS
-                        public_url = self.upload_image_public(
-                            image_content, filename, user_id, job_id
-                        )
-                        
-                        # Map both full path and filename to URL
-                        url_mapping[name] = public_url  # "artifacts/image_000001.png"
-                        url_mapping[filename] = public_url  # "image_000001.png"
-                        
-                        logger.debug(f"Uploaded image: {name} -> {public_url}")
-            
-            logger.info(f"Uploaded {len(url_mapping) // 2} images from ZIP for job {job_id}")
-            
+
+                        # Upload to GCS with per-image retry
+                        uploaded = False
+                        for attempt in range(3):
+                            try:
+                                public_url = self.upload_image_public(
+                                    image_content, filename, user_id, job_id
+                                )
+                                # Map both full path and filename to URL
+                                url_mapping[name] = public_url
+                                url_mapping[filename] = public_url
+                                logger.debug(f"Uploaded image: {name} -> {public_url}")
+                                uploaded = True
+                                break
+                            except Exception as img_err:
+                                logger.warning(
+                                    "Image upload attempt %d/3 failed for %s: %s",
+                                    attempt + 1, name, img_err,
+                                )
+                        if not uploaded:
+                            failed_images.append(name)
+
+            total = len(url_mapping) // 2
+            logger.info(f"Uploaded {total} images from ZIP for job {job_id}")
+            if failed_images:
+                logger.error(f"Failed to upload {len(failed_images)} images: {failed_images}")
+
         except Exception as e:
             logger.error(f"Error uploading images from ZIP: {str(e)}", exc_info=True)
-        
+
         return url_mapping
     
     def get_image(

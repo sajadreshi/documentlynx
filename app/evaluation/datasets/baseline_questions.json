@@ -1,0 +1,233 @@
+[
+  {
+    "id": "tc1",
+    "description": "Basic math multiple choice question",
+    "input_markdown": "## Question 1\nWhat is 2 + 2?\n\n(A) 3\n(B) 4\n(C) 5\n(D) 6",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "multiple_choice",
+          "topic": "math",
+          "difficulty": "easy",
+          "cognitive_level": "knowledge"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"What is 2 + 2?\\n\\n(A) 3\\n(B) 4\\n(C) 5\\n(D) 6\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"3\", \"B\": \"4\", \"C\": \"5\", \"D\": \"6\"}, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"math\", \"subtopic\": \"arithmetic\", \"difficulty\": \"easy\", \"grade_level\": \"elementary\", \"cognitive_level\": \"knowledge\", \"tags\": [\"addition\", \"basic arithmetic\"]}]"
+    }
+  },
+  {
+    "id": "tc2",
+    "description": "Physics open-ended question with formula",
+    "input_markdown": "## Question 1\nDerive the equation of motion for a projectile launched at angle theta with initial velocity v0. Ignore air resistance and express your answer in terms of g, v0, and theta.",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "open_ended",
+          "topic": "physics",
+          "difficulty": "hard",
+          "cognitive_level": "application"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"Derive the equation of motion for a projectile launched at angle theta with initial velocity v0. Ignore air resistance and express your answer in terms of g, v0, and theta.\", \"question_type\": \"open_ended\", \"options\": null, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"physics\", \"subtopic\": \"kinematics\", \"difficulty\": \"hard\", \"grade_level\": \"high_school\", \"cognitive_level\": \"application\", \"tags\": [\"projectile motion\", \"kinematics\", \"derivation\"]}]"
+    }
+  },
+  {
+    "id": "tc3",
+    "description": "Chemistry true/false question",
+    "input_markdown": "## Question 1\nTrue or False: Water (H2O) is composed of two hydrogen atoms and one oxygen atom.\n\n(A) True\n(B) False",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "true_false",
+          "topic": "chemistry",
+          "difficulty": "easy",
+          "cognitive_level": "knowledge"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"True or False: Water (H2O) is composed of two hydrogen atoms and one oxygen atom.\", \"question_type\": \"true_false\", \"options\": {\"A\": \"True\", \"B\": \"False\"}, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"chemistry\", \"subtopic\": \"molecular structure\", \"difficulty\": \"easy\", \"grade_level\": \"middle_school\", \"cognitive_level\": \"knowledge\", \"tags\": [\"water\", \"molecular formula\", \"atoms\"]}]"
+    }
+  },
+  {
+    "id": "tc4",
+    "description": "Biology fill-in-the-blank question",
+    "input_markdown": "## Question 1\nFill in the blank: The process by which plants convert sunlight into chemical energy is called __________.",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "fill_in_blank",
+          "topic": "biology",
+          "difficulty": "easy",
+          "cognitive_level": "knowledge"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"Fill in the blank: The process by which plants convert sunlight into chemical energy is called __________.\", \"question_type\": \"fill_in_blank\", \"options\": null, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"biology\", \"subtopic\": \"plant biology\", \"difficulty\": \"easy\", \"grade_level\": \"middle_school\", \"cognitive_level\": \"knowledge\", \"tags\": [\"photosynthesis\", \"plants\", \"energy conversion\"]}]"
+    }
+  },
+  {
+    "id": "tc5",
+    "description": "History multiple choice question",
+    "input_markdown": "## Question 1\nIn what year did World War II end?\n\n(A) 1943\n(B) 1944\n(C) 1945\n(D) 1946",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "multiple_choice",
+          "topic": "history",
+          "difficulty": "easy",
+          "cognitive_level": "knowledge"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"In what year did World War II end?\\n\\n(A) 1943\\n(B) 1944\\n(C) 1945\\n(D) 1946\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"1943\", \"B\": \"1944\", \"C\": \"1945\", \"D\": \"1946\"}, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"history\", \"subtopic\": \"world war ii\", \"difficulty\": \"easy\", \"grade_level\": \"high_school\", \"cognitive_level\": \"knowledge\", \"tags\": [\"WWII\", \"20th century\", \"world history\"]}]"
+    }
+  },
+  {
+    "id": "tc6",
+    "description": "English literature open-ended analysis question",
+    "input_markdown": "## Question 1\nAnalyze the use of symbolism in George Orwell's \"Animal Farm.\" Discuss at least three symbols and explain how they contribute to the novel's critique of totalitarianism.",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "open_ended",
+          "topic": "english",
+          "difficulty": "hard",
+          "cognitive_level": "analysis"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"Analyze the use of symbolism in George Orwell's \\\"Animal Farm.\\\" Discuss at least three symbols and explain how they contribute to the novel's critique of totalitarianism.\", \"question_type\": \"open_ended\", \"options\": null, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"english\", \"subtopic\": \"literary analysis\", \"difficulty\": \"hard\", \"grade_level\": \"high_school\", \"cognitive_level\": \"analysis\", \"tags\": [\"symbolism\", \"Animal Farm\", \"Orwell\", \"totalitarianism\"]}]"
+    }
+  },
+  {
+    "id": "tc7",
+    "description": "Multi-question document with math and physics",
+    "input_markdown": "## Question 1\nSolve for x: 3x + 7 = 22\n\n(A) 3\n(B) 5\n(C) 7\n(D) 15\n\n## Question 2\nA car accelerates from rest at 2 m/s^2 for 10 seconds. What is its final velocity?\n\n(A) 5 m/s\n(B) 10 m/s\n(C) 20 m/s\n(D) 40 m/s\n\n## Question 3\nWhat is the derivative of f(x) = x^3 + 2x?\n\n(A) 3x^2\n(B) 3x^2 + 2\n(C) x^2 + 2\n(D) 3x + 2",
+    "expected": {
+      "question_count": 3,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "multiple_choice",
+          "topic": "math",
+          "difficulty": "easy",
+          "cognitive_level": "application"
+        },
+        {
+          "question_number": 2,
+          "question_type": "multiple_choice",
+          "topic": "physics",
+          "difficulty": "medium",
+          "cognitive_level": "application"
+        },
+        {
+          "question_number": 3,
+          "question_type": "multiple_choice",
+          "topic": "math",
+          "difficulty": "medium",
+          "cognitive_level": "application"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"Solve for x: 3x + 7 = 22\\n\\n(A) 3\\n(B) 5\\n(C) 7\\n(D) 15\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"3\", \"B\": \"5\", \"C\": \"7\", \"D\": \"15\"}, \"image_urls\": []}, {\"question_number\": 2, \"question_text\": \"A car accelerates from rest at 2 m/s^2 for 10 seconds. What is its final velocity?\\n\\n(A) 5 m/s\\n(B) 10 m/s\\n(C) 20 m/s\\n(D) 40 m/s\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"5 m/s\", \"B\": \"10 m/s\", \"C\": \"20 m/s\", \"D\": \"40 m/s\"}, \"image_urls\": []}, {\"question_number\": 3, \"question_text\": \"What is the derivative of f(x) = x^3 + 2x?\\n\\n(A) 3x^2\\n(B) 3x^2 + 2\\n(C) x^2 + 2\\n(D) 3x + 2\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"3x^2\", \"B\": \"3x^2 + 2\", \"C\": \"x^2 + 2\", \"D\": \"3x + 2\"}, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"math\", \"subtopic\": \"algebra\", \"difficulty\": \"easy\", \"grade_level\": \"middle_school\", \"cognitive_level\": \"application\", \"tags\": [\"linear equations\", \"solving for x\"]}, {\"question_id\": \"q2\", \"topic\": \"physics\", \"subtopic\": \"kinematics\", \"difficulty\": \"medium\", \"grade_level\": \"high_school\", \"cognitive_level\": \"application\", \"tags\": [\"acceleration\", \"velocity\", \"motion\"]}, {\"question_id\": \"q3\", \"topic\": \"math\", \"subtopic\": \"calculus\", \"difficulty\": \"medium\", \"grade_level\": \"high_school\", \"cognitive_level\": \"application\", \"tags\": [\"derivatives\", \"differentiation\", \"polynomials\"]}]"
+    }
+  },
+  {
+    "id": "tc8",
+    "description": "Computer science multiple choice question",
+    "input_markdown": "## Question 1\nWhat is the time complexity of binary search on a sorted array of n elements?\n\n(A) O(1)\n(B) O(log n)\n(C) O(n)\n(D) O(n log n)",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "multiple_choice",
+          "topic": "computer_science",
+          "difficulty": "medium",
+          "cognitive_level": "comprehension"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"What is the time complexity of binary search on a sorted array of n elements?\\n\\n(A) O(1)\\n(B) O(log n)\\n(C) O(n)\\n(D) O(n log n)\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"O(1)\", \"B\": \"O(log n)\", \"C\": \"O(n)\", \"D\": \"O(n log n)\"}, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"computer_science\", \"subtopic\": \"algorithms\", \"difficulty\": \"medium\", \"grade_level\": \"undergraduate\", \"cognitive_level\": \"comprehension\", \"tags\": [\"binary search\", \"time complexity\", \"algorithms\", \"Big-O\"]}]"
+    }
+  },
+  {
+    "id": "tc9",
+    "description": "Geography question with image reference",
+    "input_markdown": "## Question 1\nRefer to the map below.\n\n![World Map](images/world_map.png)\n\nWhich continent is highlighted in the map?\n\n(A) Africa\n(B) South America\n(C) Australia\n(D) Antarctica",
+    "expected": {
+      "question_count": 1,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "multiple_choice",
+          "topic": "geography",
+          "difficulty": "easy",
+          "cognitive_level": "knowledge"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"Refer to the map below.\\n\\n![World Map](images/world_map.png)\\n\\nWhich continent is highlighted in the map?\\n\\n(A) Africa\\n(B) South America\\n(C) Australia\\n(D) Antarctica\", \"question_type\": \"multiple_choice\", \"options\": {\"A\": \"Africa\", \"B\": \"South America\", \"C\": \"Australia\", \"D\": \"Antarctica\"}, \"image_urls\": [\"images/world_map.png\"]}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"geography\", \"subtopic\": \"continents\", \"difficulty\": \"easy\", \"grade_level\": \"elementary\", \"cognitive_level\": \"knowledge\", \"tags\": [\"continents\", \"world map\", \"visual identification\"]}]"
+    }
+  },
+  {
+    "id": "tc10",
+    "description": "Mixed document with open-ended and true/false economics questions",
+    "input_markdown": "## Question 1\nExplain the concept of supply and demand. How do shifts in the supply curve affect market equilibrium price and quantity?\n\n## Question 2\nTrue or False: Inflation always leads to higher unemployment.\n\n(A) True\n(B) False",
+    "expected": {
+      "question_count": 2,
+      "questions": [
+        {
+          "question_number": 1,
+          "question_type": "open_ended",
+          "topic": "economics",
+          "difficulty": "medium",
+          "cognitive_level": "comprehension"
+        },
+        {
+          "question_number": 2,
+          "question_type": "true_false",
+          "topic": "economics",
+          "difficulty": "medium",
+          "cognitive_level": "comprehension"
+        }
+      ]
+    },
+    "mock_llm_response": {
+      "extraction": "[{\"question_number\": 1, \"question_text\": \"Explain the concept of supply and demand. How do shifts in the supply curve affect market equilibrium price and quantity?\", \"question_type\": \"open_ended\", \"options\": null, \"image_urls\": []}, {\"question_number\": 2, \"question_text\": \"True or False: Inflation always leads to higher unemployment.\", \"question_type\": \"true_false\", \"options\": {\"A\": \"True\", \"B\": \"False\"}, \"image_urls\": []}]",
+      "classification": "[{\"question_id\": \"q1\", \"topic\": \"economics\", \"subtopic\": \"microeconomics\", \"difficulty\": \"medium\", \"grade_level\": \"high_school\", \"cognitive_level\": \"comprehension\", \"tags\": [\"supply and demand\", \"market equilibrium\", \"supply curve\"]}, {\"question_id\": \"q2\", \"topic\": \"economics\", \"subtopic\": \"macroeconomics\", \"difficulty\": \"medium\", \"grade_level\": \"high_school\", \"cognitive_level\": \"comprehension\", \"tags\": [\"inflation\", \"unemployment\", \"Phillips curve\"]}]"
+    }
+  }
+]

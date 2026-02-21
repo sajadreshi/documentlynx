@@ -16,6 +16,8 @@ from app.services.storage_service import StorageService
 from app.services.prompt_template_builder import PromptTemplateBuilder
 from app.database import SessionLocal
 from app.models import Document, Question
+from app.observability import traceable
+from app.retry import retry_with_backoff
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
@@ -36,19 +38,20 @@ class PersistenceAgent:
         self.llm_model = llm_model or settings.validation_llm_model
         self.storage_service = StorageService()
     
+    @traceable(name="PersistenceAgent.process", tags=["agent", "persistence"])
     def process(self, state: AgentState) -> AgentState:
         """
         Process persistence: upload images, extract questions, save to database.
-        
+
         Workflow:
         1. Extract images from ZIP and upload to GCS
         2. Replace image paths in markdown with public URLs
         3. Use LLM to parse questions from markdown
         4. Create Document and Question records in database
-        
+
         Args:
             state: Current agent state with cleaned_markdown and output_zip_path
-            
+
         Returns:
             Updated agent state with document_id and question_ids
         """
@@ -251,19 +254,57 @@ class PersistenceAgent:
                 variables={"markdown_content": truncated_markdown}
             )
             
-            # Call LLM
-            response = llm.invoke(prompt)
+            # Call LLM with retry
+            @retry_with_backoff(max_retries=2, base_delay=2.0)
+            def _invoke_llm():
+                return llm.invoke(prompt)
+
+            response = _invoke_llm()
             response_text = response.content if hasattr(response, 'content') else str(response)
-            
+
             # Parse JSON response
             questions = self._parse_questions_json(response_text)
-            
+
             return questions
-            
+
         except Exception as e:
             logger.error(f"LLM question extraction error: {str(e)}", exc_info=True)
             return []
     
+    def _fix_json_escapes(self, raw: str) -> str:
+        """
+        Fix invalid JSON escape sequences in LLM output.
+        JSON only allows \\, \", \\/, \\b, \\f, \\n, \\r, \\t, \\uXXXX.
+        Other backslashes (e.g. \\N, \\frac, \\ in paths) cause JSONDecodeError.
+        """
+        result = []
+        i = 0
+        while i < len(raw):
+            if raw[i] != "\\":
+                result.append(raw[i])
+                i += 1
+                continue
+            if i + 1 >= len(raw):
+                result.append("\\")
+                i += 1
+                continue
+            next_c = raw[i + 1]
+            if next_c in '"\\/bfnrt':
+                result.append(raw[i])
+                result.append(next_c)
+                i += 2
+                continue
+            if next_c == "u" and i + 5 < len(raw):
+                hex_part = raw[i + 2 : i + 6]
+                if all(c in "0123456789abcdefABCDEF" for c in hex_part):
+                    result.append(raw[i : i + 6])
+                    i += 6
+                    continue
+            # Invalid escape: escape the backslash so next char is literal
+            result.append("\\\\")
+            i += 1
+        return "".join(result)
+
     def _parse_questions_json(self, response_text: str) -> list[dict]:
         """
         Parse JSON array of questions from LLM response.
@@ -295,6 +336,7 @@ class PersistenceAgent:
             
             if start >= 0 and end > start:
                 json_str = text[start:end]
+                json_str = self._fix_json_escapes(json_str)
                 questions = json.loads(json_str)
                 
                 if isinstance(questions, list):
@@ -304,8 +346,8 @@ class PersistenceAgent:
             return []
             
         except json.JSONDecodeError as e:
-            logger.error(f"JSON decode error: {str(e)}")
+            logger.error(f"JSON decode error parsing questions: {str(e)}", exc_info=True)
             return []
         except Exception as e:
-            logger.error(f"Error parsing questions: {str(e)}")
+            logger.error(f"Error parsing questions: {str(e)}", exc_info=True)
             return []

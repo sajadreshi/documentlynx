@@ -95,7 +95,9 @@ python -m app.scripts.manage_clients create my_client_id my_secret_key
 1. Create a Google Cloud Storage bucket (if you haven't already)
 2. Create a Service Account with Storage Admin role
 3. Download the service account JSON key file
-4. Update `GOOGLE_APPLICATION_CREDENTIALS` in `.env` with the path to your key file
+4. Update `GOOGLE_APPLICATION_CREDENTIALS` in `.env` with the path to your key file (e.g. `path/to/your/service-account-key.json`)
+
+**Security:** Do not commit `.env` or any credentials file (e.g. `credentials.json`) to the repository. Keep keys outside the repo or in a secure location. If a key was ever exposed, rotate it in the Google Cloud Console.
 
 ## Running the Application
 

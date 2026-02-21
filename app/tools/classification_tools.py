@@ -12,6 +12,8 @@ from langchain_core.tools import tool
 
 from app.services.prompt_template_builder import PromptTemplateBuilder
 from app.tools.json_tools import parse_json_array
+from app.observability import traceable
+from app.retry import retry_with_backoff
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
@@ -83,14 +85,18 @@ def classify_question(
             name="classification",
             variables={"questions_json": questions_json}
         )
-        
-        # Call LLM
-        response = llm.invoke(prompt)
+
+        # Call LLM with retry
+        @retry_with_backoff(max_retries=2, base_delay=2.0)
+        def _invoke_llm():
+            return llm.invoke(prompt)
+
+        response = _invoke_llm()
         response_text = response.content if hasattr(response, 'content') else str(response)
-        
+
         # Parse JSON response using our json tool
         classifications = parse_json_array.invoke(response_text)
-        
+
         if classifications and len(classifications) > 0:
             classification = classifications[0]
             # Ensure question_id is set
@@ -186,14 +192,18 @@ def classify_questions_batch(
             name="classification",
             variables={"questions_json": questions_json}
         )
-        
-        # Call LLM
-        response = llm.invoke(prompt)
+
+        # Call LLM with retry
+        @retry_with_backoff(max_retries=2, base_delay=2.0)
+        def _invoke_batch_llm():
+            return llm.invoke(prompt)
+
+        response = _invoke_batch_llm()
         response_text = response.content if hasattr(response, 'content') else str(response)
-        
+
         # Parse JSON response
         classifications = parse_json_array.invoke(response_text)
-        
+
         return classifications if classifications else []
         
     except Exception as e:

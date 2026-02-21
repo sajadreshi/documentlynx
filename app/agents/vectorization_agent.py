@@ -8,6 +8,7 @@ from app.services.extraction_orchestrator import AgentState
 from app.services.embedding_service import EmbeddingService
 from app.database import SessionLocal
 from app.models import Question
+from app.observability import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class VectorizationAgent:
         """
         self.embedding_service = embedding_service or EmbeddingService()
     
+    @traceable(name="VectorizationAgent.process", tags=["agent", "vectorization"])
     def process(self, state: AgentState) -> AgentState:
         """
         Generate embeddings for questions created by PersistenceAgent.

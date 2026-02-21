@@ -11,16 +11,27 @@ logger = logging.getLogger(__name__)
 
 
 def _update_job_status(job_id: str, status: str, error_message: str = None) -> None:
-    """Helper to update job status in database."""
-    db = None
-    try:
-        db = SessionLocal()
-        JobService.update_status(db, job_id, status, error_message)
-    except Exception as e:
-        logger.error(f"Failed to update job status: {e}")
-    finally:
-        if db:
-            db.close()
+    """Helper to update job status in database with retry."""
+    last_error = None
+    for attempt in range(3):
+        db = None
+        try:
+            db = SessionLocal()
+            JobService.update_status(db, job_id, status, error_message)
+            return
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "Attempt %d/3 to update job %s status failed: %s",
+                attempt + 1, job_id, e,
+            )
+        finally:
+            if db:
+                db.close()
+    logger.critical(
+        "CRITICAL: All 3 attempts to update job %s status to '%s' failed: %s",
+        job_id, status, last_error,
+    )
 
 
 # Define the agent state schema

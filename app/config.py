@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     embedding_model: str = "all-MiniLM-L6-v2"  # Model name for embeddings
     embedding_dimensions: int = 384  # Must match model output dimensions
 
+    # LangSmith Configuration (optional)
+    langsmith_api_key: Optional[str] = None
+    langsmith_project: str = "doculord"
+    langsmith_tracing_v2: bool = False
+
     class Config:
         """Pydantic config."""
 

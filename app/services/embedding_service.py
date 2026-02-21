@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.config import settings
 from app.models import Question
+from app.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -79,13 +80,14 @@ class EmbeddingService:
                 logger.error(f"Failed to create HuggingFace embeddings: {e}")
                 raise
     
+    @retry_with_backoff(max_retries=2, base_delay=1.0)
     def embed_text(self, text: str) -> list[float]:
         """
         Generate embedding for a single text.
-        
+
         Args:
             text: Text to embed
-            
+
         Returns:
             List of floats representing the embedding vector
         """
@@ -94,20 +96,21 @@ class EmbeddingService:
         except Exception as e:
             logger.error(f"Error embedding text: {e}")
             raise
-    
+
+    @retry_with_backoff(max_retries=2, base_delay=1.0)
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for multiple texts (batch processing).
-        
+
         Args:
             texts: List of texts to embed
-            
+
         Returns:
             List of embedding vectors
         """
         if not texts:
             return []
-        
+
         try:
             return self.embeddings.embed_documents(texts)
         except Exception as e:

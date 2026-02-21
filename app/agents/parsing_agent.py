@@ -10,6 +10,8 @@ from typing import Optional
 
 from app.services.extraction_orchestrator import AgentState
 from app.services.prompt_template_builder import PromptTemplateBuilder
+from app.observability import traceable
+from app.retry import retry_with_backoff
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
@@ -29,19 +31,20 @@ class ParsingAgent:
         
         self.llm_model = llm_model or settings.validation_llm_model  # Reuse validation model setting
     
+    @traceable(name="ParsingAgent.process", tags=["agent", "parsing"])
     def process(self, state: AgentState) -> AgentState:
         """
         Process markdown cleanup using LLM.
-        
+
         Workflow:
         1. Load markdown content from ZIP
         2. Send to LLM for cleanup
         3. Save cleaned markdown back to ZIP or state
         4. Update state with cleaned content
-        
+
         Args:
             state: Current agent state with output_zip_path
-            
+
         Returns:
             Updated agent state with cleaned_markdown
         """
@@ -171,9 +174,13 @@ class ParsingAgent:
             
             # Build prompt using PromptTemplateBuilder
             prompt = self._build_parsing_prompt(variables)
-            
-            # Call LLM
-            response = llm.invoke(prompt)
+
+            # Call LLM with retry
+            @retry_with_backoff(max_retries=2, base_delay=2.0)
+            def _invoke_llm():
+                return llm.invoke(prompt)
+
+            response = _invoke_llm()
             response_text = response.content if hasattr(response, 'content') else str(response)
             
             # Clean up the response - remove any markdown code block wrappers

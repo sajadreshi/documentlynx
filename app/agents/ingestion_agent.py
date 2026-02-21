@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from pathlib import Path
 from app.services.extraction_orchestrator import AgentState
 from app.services.docling_service import docling_service, DoclingOptions
+from app.observability import traceable
 
 logger = logging.getLogger(__name__)
 
@@ -124,18 +125,19 @@ def determine_document_type(url: str, filename: str = "") -> str:
 class IngestionAgent:
     """Agent responsible for document ingestion and format detection."""
     
+    @traceable(name="IngestionAgent.process", tags=["agent", "ingestion"])
     def process(self, state: AgentState) -> AgentState:
         """
         Process document ingestion.
-        
+
         Receives the document URL, determines document type, converts to markdown,
         and updates the state. Supports two conversion methods:
         - URL-based (default): Sends URL to Docling API, returns markdown in-body
         - File-based (when use_file_conversion=True): Downloads file, converts with ZIP output
-        
+
         Args:
             state: Current agent state with document_url
-            
+
         Returns:
             Updated agent state with file_type and raw_content (or output_zip_path) set
         """

@@ -16,6 +16,7 @@ from app.services.prompt_template_builder import PromptTemplateBuilder
 from app.database import SessionLocal
 from app.models import Question
 from app.tools import parse_json_array, classify_question, classify_questions_batch
+from app.observability import traceable
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class ClassificationAgent:
         
         self.llm_model = llm_model or settings.validation_llm_model
     
+    @traceable(name="ClassificationAgent.process", tags=["agent", "classification"])
     def process(self, state: AgentState) -> AgentState:
         """
         Classify questions created by PersistenceAgent.

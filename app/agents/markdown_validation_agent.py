@@ -11,6 +11,8 @@ from typing import Optional
 from app.services.extraction_orchestrator import AgentState
 from app.services.docling_service import docling_service
 from app.services.prompt_template_builder import PromptTemplateBuilder
+from app.observability import traceable
+from app.retry import retry_with_backoff
 from llms import get_llm
 
 logger = logging.getLogger(__name__)
@@ -167,20 +169,21 @@ class MarkdownValidationAgent:
         self.max_attempts = max_attempts or settings.max_validation_attempts
         self.passing_score = 70
     
+    @traceable(name="MarkdownValidationAgent.process", tags=["agent", "validation"])
     def process(self, state: AgentState) -> AgentState:
         """
         Process markdown validation by comparing generated markdown against source document.
-        
+
         Workflow:
         1. Load markdown content from ZIP
         2. Load source file information
         3. Call LLM to assess quality
         4. If failed and attempts < max, prepare next Docling config for retry
         5. Update state with validation results
-        
+
         Args:
             state: Current agent state with output_zip_path and source_file_path
-            
+
         Returns:
             Updated agent state with validation_passed, validation_feedback, etc.
         """
@@ -259,10 +262,11 @@ class MarkdownValidationAgent:
                             state["metadata"]["retry_config"] = next_config
                             logger.info(f"  - Preparing retry with config: {next_config}")
             else:
-                # LLM call failed - don't block the pipeline
-                logger.warning("LLM validation failed, passing by default")
-                state["validation_passed"] = True
-                state["validation_feedback"] = "LLM validation unavailable, passed by default"
+                # LLM call returned None — treat as validation failure so retry logic
+                # can kick in with different Docling options
+                logger.warning("LLM validation returned no result, marking as failed")
+                state["validation_passed"] = False
+                state["validation_feedback"] = "LLM validation returned no parseable result"
             
             # Step 6: Handle cleanup if validation passed or max attempts reached
             if state.get("validation_passed", False) or validation_attempts >= self.max_attempts:
@@ -276,9 +280,10 @@ class MarkdownValidationAgent:
         except Exception as e:
             error_msg = f"Error during validation: {str(e)}"
             logger.error(error_msg, exc_info=True)
-            state["validation_passed"] = True  # Don't block pipeline on validation errors
+            # Mark as failed so retry logic can try again with different options
+            state["validation_passed"] = False
             state["validation_feedback"] = error_msg
-            self._cleanup_source_file(state)
+            state["metadata"]["validation_exception"] = True
         
         logger.info(f"Markdown validation agent completed for job {job_id}")
         return state
@@ -378,9 +383,13 @@ class MarkdownValidationAgent:
             
             # Build prompt using PromptTemplateBuilder
             prompt = self._build_validation_prompt(variables)
-            
-            # Call LLM
-            response = llm.invoke(prompt)
+
+            # Call LLM with retry
+            @retry_with_backoff(max_retries=2, base_delay=2.0)
+            def _invoke_llm():
+                return llm.invoke(prompt)
+
+            response = _invoke_llm()
             response_text = response.content if hasattr(response, 'content') else str(response)
             
             # Parse JSON response using robust parser

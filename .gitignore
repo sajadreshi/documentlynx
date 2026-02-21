@@ -25,6 +25,11 @@ wheels/
 
 # Environment variables
 .env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.log
 
 # IDE
 .vscode/
@@ -40,4 +45,20 @@ Thumbs.db
 # Service account keys
 *.json
 !requirements.txt
+!app/evaluation/datasets/*.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/tsconfig.app.json
+!frontend/tsconfig.node.json
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Temp files
+temp/
+
+# Evaluation output
+eval_results.json
 
