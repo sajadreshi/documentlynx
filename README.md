@@ -1,251 +1,209 @@
-# Document Upload API
+# DocumentLynx
 
-A production-ready Python API for uploading documents to Google Cloud Storage. Documents are organized by user ID within the `documents.in` folder structure.
+A multi-agent platform for automated question extraction and management from educational documents.
 
-## Features
+DocumentLynx processes PDF exam papers and worksheets through a six-stage AI pipeline — parsing, validation, extraction, persistence, classification, and vectorization — to produce structured, searchable question banks with a web-based editing interface.
 
-- Upload documents to Google Cloud Storage
-- Automatic folder organization by user ID (`documents.in/{user_id}/`)
-- Returns public URLs with full access rights
-- Client authentication using clientId and secret (stored in PostgreSQL)
-- Modular, clean architecture
-- Comprehensive error handling and logging
-- Environment-based configuration
+## Architecture
+
+![End-to-End Flow](docs/documentlynx-flow.png)
+
+**Processing Pipeline** — Six LangGraph agents operate in sequence:
+
+| Stage | Agent | What it does |
+|-------|-------|-------------|
+| 1 | Ingestion | Accepts upload, stores PDF in GCS, creates job |
+| 2 | Parsing | IBM Docling converts PDF to Markdown (preserves formulas, tables, images) |
+| 3 | Validation | LLM checks structural correctness, retries up to 3x |
+| 4 | Persistence | LLM extracts individual questions, stores in PostgreSQL |
+| 5 | Classification | LLM classifies by type, topic, difficulty, cognitive level |
+| 6 | Vectorization | Generates embeddings, stores in pgvector for semantic search |
+
+**Frontend** — React app with document upload, real-time status tracking, question browser, and split-pane Markdown editor with live KaTeX math preview.
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend | Python, FastAPI, LangGraph, LangChain |
+| Database | PostgreSQL 15+ with pgvector |
+| Storage | Google Cloud Storage |
+| Document Parsing | IBM Docling |
+| LLM | Groq (LLaMA 3.3 70B) |
+| Embeddings | HuggingFace sentence-transformers (all-MiniLM-L6-v2) |
+| Frontend | React 19, TypeScript, Vite, TanStack Query, CodeMirror 6, KaTeX |
+| Observability | LangSmith (optional) |
 
 ## Prerequisites
 
-- Python 3.8 or higher
-- PostgreSQL database
-- Google Cloud Storage bucket
-- Google Cloud Service Account with Storage Admin permissions
-- Service account JSON key file
+- Python 3.8+
+- Node.js 18+
+- PostgreSQL 15+ with [pgvector](https://github.com/pgvector/pgvector) extension
+- Google Cloud service account with Storage Object Admin role
+- [Groq API key](https://console.groq.com) (free tier available)
+- [IBM Docling](https://github.com/DS4SD/docling) running on port 5001
 
-## Setup
+## Quick Start
 
-### 1. Clone and Navigate to Project
-
-```bash
-cd /Users/sajad/Documents/projects/dcumently
-```
-
-### 2. Create Virtual Environment
+### 1. Clone & Configure
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure Environment Variables
-
-Copy the example environment file and fill in your values:
-
-```bash
+git clone https://github.com/sajadreshi/documentlynx.git
+cd documentlynx
 cp .env.example .env
 ```
 
-Edit `.env` with your configuration:
+Edit `.env`:
 
 ```env
+DATABASE_URL=postgresql://username:password@localhost:5432/documently
 GOOGLE_CLOUD_PROJECT_ID=your-project-id
 GOOGLE_CLOUD_STORAGE_BUCKET=your-bucket-name
-GOOGLE_APPLICATION_CREDENTIALS=path/to/your/service-account-key.json
-
-API_HOST=0.0.0.0
-API_PORT=8000
-
-DATABASE_URL=postgresql://username:password@localhost:5432/dcumently_db
+GOOGLE_APPLICATION_CREDENTIALS=path/to/credentials.json
+GROQ_API_KEY=your-groq-api-key
 ```
 
-### 5. Database Setup
+### 2. Database
 
-1. Create a PostgreSQL database:
 ```bash
-createdb dcumently_db
+createdb documently
+psql -d documently -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-2. The database tables will be automatically created on application startup, or you can manually initialize them:
+### 3. Backend
+
 ```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 python -m app.scripts.init_db
+python -m app.scripts.manage_clients create dev-client dev-secret
+uvicorn app.main:app --reload --port 8000
 ```
 
-3. Create client credentials for API authentication:
-```bash
-python -m app.scripts.manage_clients create <client_id> <client_secret>
-```
+Backend runs at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
 
-Example:
-```bash
-python -m app.scripts.manage_clients create my_client_id my_secret_key
-```
+### 4. Frontend
 
-**Client Management Commands:**
-- List all clients: `python -m app.scripts.manage_clients list`
-- Activate a client: `python -m app.scripts.manage_clients activate <client_id>`
-- Deactivate a client: `python -m app.scripts.manage_clients deactivate <client_id>`
-- Delete a client: `python -m app.scripts.manage_clients delete <client_id>`
-
-### 6. Google Cloud Storage Setup
-
-1. Create a Google Cloud Storage bucket (if you haven't already)
-2. Create a Service Account with Storage Admin role
-3. Download the service account JSON key file
-4. Update `GOOGLE_APPLICATION_CREDENTIALS` in `.env` with the path to your key file (e.g. `path/to/your/service-account-key.json`)
-
-**Security:** Do not commit `.env` or any credentials file (e.g. `credentials.json`) to the repository. Keep keys outside the repo or in a secure location. If a key was ever exposed, rotate it in the Google Cloud Console.
-
-## Running the Application
-
-### Development Mode
+Open a new terminal:
 
 ```bash
-python -m app.main
+cd frontend
+npm install
 ```
 
-Or using uvicorn directly:
+Create `frontend/.env`:
+
+```env
+VITE_API_URL=http://localhost:8000
+VITE_CLIENT_ID=dev-client
+VITE_CLIENT_SECRET=dev-secret
+```
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+npm run dev
 ```
 
-### Production Mode
+Frontend runs at `http://localhost:5173`.
+
+### 5. Docling (Document Parser)
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+docker run -p 5001:5001 ds4sd/docling-serve
 ```
 
-The API will be available at `http://localhost:8000`
+### 6. Verify
 
-## API Documentation
-
-Once the server is running, you can access:
-
-- **Interactive API Docs (Swagger UI)**: `http://localhost:8000/docs`
-- **ReDoc Documentation**: `http://localhost:8000/redoc`
+1. Open `http://localhost:5173`
+2. Upload a PDF document
+3. Watch the pipeline process through all 6 stages
+4. Browse extracted questions and edit them in the split-pane editor
 
 ## API Endpoints
 
-### Health Check
+All endpoints require `X-Client-Id` and `X-Client-Secret` headers.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/documently/api/v1/upload` | Upload a document (multipart) |
+| `POST` | `/documently/api/v1/process-doc` | Trigger async processing pipeline |
+| `GET` | `/documently/api/v1/jobs/{id}` | Poll job status |
+| `GET` | `/documently/api/v1/documents` | List documents (paginated) |
+| `GET` | `/documently/api/v1/documents/{id}` | Document detail |
+| `GET` | `/documently/api/v1/documents/{id}/questions` | List questions (paginated) |
+| `GET` | `/documently/api/v1/documents/{id}/questions/{qid}` | Question detail |
+| `PUT` | `/documently/api/v1/documents/{id}/questions/{qid}` | Update question, options, correct answer |
+| `GET` | `/health/detailed` | Health check (database, GCS, Docling) |
+
+## Client Management
 
 ```bash
-GET /health
+python -m app.scripts.manage_clients create <client_id> <secret>
+python -m app.scripts.manage_clients list
+python -m app.scripts.manage_clients activate <client_id>
+python -m app.scripts.manage_clients deactivate <client_id>
+python -m app.scripts.manage_clients delete <client_id>
 ```
 
-Returns the health status of the API. This endpoint does not require authentication.
-
-### Upload Document
+## Running Tests
 
 ```bash
-POST /documently/api/v1/upload
+pytest tests/ -v
 ```
 
-**Authentication Required:**
-- `X-Client-Id`: Client ID header (required)
-- `X-Client-Secret`: Client secret header (required)
+## Running Evaluations
 
-**Request:**
-- `file`: The document file (multipart/form-data)
-- `user_id`: User ID for organizing documents (form field)
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Document uploaded successfully",
-  "url": "https://storage.googleapis.com/bucket-name/documents.in/user123/document.pdf",
-  "user_id": "user123",
-  "filename": "document.pdf"
-}
-```
-
-**Example using curl:**
 ```bash
-curl -X POST "http://localhost:8000/documently/api/v1/upload" \
-  -H "X-Client-Id: your_client_id" \
-  -H "X-Client-Secret: your_client_secret" \
-  -F "file=@/path/to/your/document.pdf" \
-  -F "user_id=user123"
-```
+# Mock mode (no LLM calls)
+python run_evals.py --mode mock --agent all
 
-**Example using Python requests:**
-```python
-import requests
-
-url = "http://localhost:8000/documently/api/v1/upload"
-headers = {
-    "X-Client-Id": "your_client_id",
-    "X-Client-Secret": "your_client_secret"
-}
-files = {"file": open("document.pdf", "rb")}
-data = {"user_id": "user123"}
-
-response = requests.post(url, headers=headers, files=files, data=data)
-print(response.json())
+# Live mode (requires Groq API key)
+python run_evals.py --mode live --agent extraction --output eval_results.json
 ```
 
 ## Project Structure
 
 ```
-dcumently/
+documentlynx/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI application
-│   ├── config.py            # Configuration management
-│   ├── database.py          # Database connection
-│   ├── models.py            # Database models
-│   ├── auth.py              # Authentication dependencies
-│   ├── api_routes.py        # API routes with authentication
-│   ├── utils.py             # Utility functions
-│   ├── services/
-│   │   ├── __init__.py
-│   │   └── storage_service.py  # Google Cloud Storage service
-│   └── scripts/
-│       ├── __init__.py
-│       ├── init_db.py       # Database initialization script
-│       └── manage_clients.py # Client credential management
+│   ├── main.py                 # FastAPI application & startup
+│   ├── config.py               # Pydantic settings
+│   ├── database.py             # SQLAlchemy connection
+│   ├── models.py               # ORM models (Document, Question, Job)
+│   ├── auth.py                 # Client credential authentication
+│   ├── api_routes.py           # Upload & processing endpoints
+│   ├── question_routes.py      # Document & question CRUD endpoints
+│   ├── exceptions.py           # Typed exception hierarchy
+│   ├── retry.py                # Exponential backoff decorator
+│   ├── circuit_breaker.py      # Circuit breaker pattern
+│   ├── observability.py        # LangSmith @traceable wrapper
+│   ├── agents/                 # LangGraph agents (6 pipeline stages)
+│   ├── services/               # Business logic (storage, embedding, orchestrator)
+│   ├── tools/                  # Classification, search, JSON parsing tools
+│   ├── evaluation/             # Evaluation harness & baseline datasets
+│   └── scripts/                # DB init, client management
+├── frontend/
+│   ├── src/
+│   │   ├── pages/              # Upload, Documents, Detail, QuestionEdit
+│   │   ├── components/         # Dropzone, StatusTracker, Editor, Preview
+│   │   ├── hooks/              # Job polling, unsaved changes
+│   │   └── api/                # Axios client & API functions
+│   └── package.json
+├── tests/                      # pytest test suite
+├── prompts/                    # YAML prompt templates
+├── docs/                       # Architecture diagrams
 ├── requirements.txt
 ├── .env.example
-├── .env                     # Your local configuration (not in git)
-├── .gitignore
 └── README.md
 ```
 
-## Authentication
+## Security
 
-All API endpoints under `/documently/api/v1/` require authentication using client credentials:
-
-1. **Client ID and Secret**: Stored in PostgreSQL database (secrets are hashed using bcrypt)
-2. **Headers Required**: 
-   - `X-Client-Id`: Your client ID
-   - `X-Client-Secret`: Your client secret (plain text, will be verified against hashed version)
-
-3. **Managing Clients**: Use the management script to create, list, activate, deactivate, or delete client credentials.
-
-## Error Handling
-
-The API includes comprehensive error handling:
-
-- **401 Unauthorized**: Invalid or missing client credentials
-- **400 Bad Request**: Invalid input (empty user_id, filename, or file content)
-- **500 Internal Server Error**: Google Cloud Storage errors or unexpected errors
-
-All errors are logged with appropriate detail levels.
-
-## Security Notes
-
-- Never commit your `.env` file or service account keys to version control
-- Client secrets are hashed using bcrypt before storage
-- The service account key should have minimal required permissions (Storage Admin for the specific bucket)
-- Keep your client credentials secure and rotate them regularly
-- The returned URLs are publicly accessible - ensure this meets your security requirements
+- Client secrets are bcrypt-hashed in PostgreSQL
+- Never commit `.env` or credential files
+- CORS configured for localhost development; restrict in production
 - Use HTTPS in production environments
 
 ## License
 
 This project is provided as-is for use in your applications.
-
